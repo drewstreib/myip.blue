@@ -11,6 +11,9 @@
   "keywords": [],
   "description": "",
   "dependencies": {
-    "express": "*"
+    "body-parser": "*",
+    "express": "*",
+    "nocache": "*",
+    "request-ip": "*"
   }
 }
