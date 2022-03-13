@@ -14,6 +14,9 @@ html(lang="en")
                 font-weight: bold;
                 color: #0000CC;
             }
+            .bold {
+                font-weight: bold;
+            }
             
     body
         h1 myip.blue - Because IP addresses are blue!
@@ -21,7 +24,8 @@ html(lang="en")
             span.blue(style="display:inline") #{clientIp}
         table(style='border:thin solid; border-collapse:collapse; border-color:#0000CC')
             tr
-                td(colspan='2', style='border:thin solid; border-color:#0000CC; background-color:#CCCCFF; font-weight:bold') Headers
+                td(colspan='2', style='border:thin solid; border-color:#0000CC; background-color:#CCCCFF') 
+                    | #[span.bold Headers] #[i (server side proxy headers in italics)]
             each val, index in headers
                 tr
                     if (index.substr(0, 12) == "x-forwarded-")
