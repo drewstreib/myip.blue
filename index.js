@@ -1,60 +1,61 @@
-const express = require('express');
-const nocache = require('nocache');
-const requestIp = require('request-ip');
+const express = require("express");
+const nocache = require("nocache");
+const requestIp = require("request-ip");
 
 const app = express();
 const port = 8080;
 
 app.use(nocache());
-app.use('/static', express.static('static'))
-app.set('views', './views');
-app.set('view engine', 'pug');
+app.use("/static", express.static("static"));
+app.set("views", "./views");
+app.set("view engine", "pug");
 
 app.use(function (req, res, next) {
-    // since we're going through proxy, fixing host header
-    req.headers['host'] = req.headers['x-forwarded-host'];
-    delete req.headers['x-forwarded-host'];
+  // since we're going through proxy, fixing host header
+  req.headers["host"] = req.headers["x-forwarded-host"];
+  delete req.headers["x-forwarded-host"];
 
-    // the proxy can cause ipv4 addresses in ipv6 notation. this fixes it.
-    var myip = requestIp.getClientIp(req);
-    if (myip.substr(0, 7) == "::ffff:") { myip = myip.substr(7); }
-    req.myip = myip;
-    next();
+  // the proxy can cause ipv4 addresses in ipv6 notation. this fixes it.
+  var myip = requestIp.getClientIp(req);
+  if (myip.substr(0, 7) == "::ffff:") {
+    myip = myip.substr(7);
+  }
+  req.myip = myip;
+  next();
 });
 
-app.get('/', (req, res) => {
-    out = {
-        "clientIp": req.myip,
-        "headers": req.headers
-    }
+app.get("/", (req, res) => {
+  out = {
+    clientIp: req.myip,
+    headers: req.headers,
+  };
 
-    // send plain response for some agents
-    do_plain = [ 'curl', 'wget' ]; 
-    if (do_plain.includes(req.header('User-Agent').substr(0, 4))) {
-        res.set({ 'Content-Type': 'text/plain', });
-        res.send(req.myip);       
-    } else {
-        res.render('index', out);
-    }
+  // send plain response for some agents
+  do_plain = ["curl", "wget"];
+  if (do_plain.includes(req.header("User-Agent").substr(0, 4))) {
+    res.set({ "Content-Type": "text/plain" });
+    res.send(req.myip);
+  } else {
+    res.render("index", out);
+  }
 });
 
-app.get('/ip/', (req, res) => {
-    res.set({ 'Content-Type': 'text/plain', });
-    res.send(req.myip);       
+app.get("/ip/", (req, res) => {
+  res.set({ "Content-Type": "text/plain" });
+  res.send(req.myip);
 });
 
-app.get('/json/', (req, res) => {
-    out = {
-        "clientIp": req.myip,
-        "headers": req.headers
-    }
-    res.header("Content-Type",'application/json');
-    res.json(out);
+app.get("/json/", (req, res) => {
+  out = {
+    clientIp: req.myip,
+    headers: req.headers,
+  };
+  res.header("Content-Type", "application/json");
+  res.json(out);
 });
 
 app.use((req, res, next) => {
-  res.status(404).send("Sorry! Blue can't find that!")
-})
+  res.status(404).send("Sorry! Blue can't find that!");
+});
 
 app.listen(port, () => console.log(`***** app listening on port ${port}!`));
-
