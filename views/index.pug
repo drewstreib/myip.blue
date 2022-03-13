@@ -28,15 +28,11 @@ html(lang="en")
                     | #[span.bold Headers] #[i (server side proxy headers in italics)]
             each val, index in headers
                 tr
-                    if (index.substr(0, 12) == "x-forwarded-")
+                    if (index == "x-forwarded-for")
                         td(style='border:thin solid; border-color:#0000CC; font-style: italic')= index
+                        td(style='border:thin solid; border-color:#0000CC; font-style: italic; color:#0000CC')= val
                     else
                         td(style='border:thin solid; border-color:#0000CC')= index
-                    if (index == 'x-forwarded-for')
-                        td(style='border:thin solid; border-color:#0000CC; font-style: italic; color:#0000CC')= val
-                    else if (index.substr(0, 12) == "x-forwarded-")
-                        td(style='border:thin solid; border-color:#0000CC; font-style: italic')= val
-                    else
                         td(style='border:thin solid; border-color:#0000CC')= val
         h2 Usage:
         ul 

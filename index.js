@@ -11,8 +11,9 @@ app.set('views', './views');
 app.set('view engine', 'pug');
 
 app.use(function (req, res, next) {
-    // since we're going through proxy, this host header is meaningless
-    delete req.headers['host'];
+    // since we're going through proxy, fixing host header
+    req.headers['host'] = req.headers['x-forwarded-host'];
+    delete req.headers['x-forwarded-host'];
 
     // the proxy can cause ipv4 addresses in ipv6 notation. this fixes it.
     var myip = requestIp.getClientIp(req);
