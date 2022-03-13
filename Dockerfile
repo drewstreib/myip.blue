@@ -16,5 +16,6 @@ COPY --from=base /build/node_modules ./node_modules
 COPY . .
 
 EXPOSE 8080
+EXPOSE 8081
 #ENV DEBUG=express:*
 CMD ["npm","run","start"]

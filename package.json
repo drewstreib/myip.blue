@@ -13,6 +13,8 @@
   "dependencies": {
     "body-parser": "*",
     "express": "*",
+    "fs": "*",
+    "https": "*",
     "nocache": "*",
     "pug": "*",
     "request-ip": "*"

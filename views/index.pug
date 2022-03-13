@@ -5,6 +5,7 @@ html(lang="en")
     style.
       body {
         font-family: Verdana;
+        text-size-adjust: 80%;
       }
       .blue {
         color: #0000CC;
@@ -20,20 +21,27 @@ html(lang="en")
       
   body
     h1 myip.blue - Because IP addresses are blue!
-    h1 Your IP address: 
+    h1 Your public IP address: 
       span.blue(style="display:inline") #{clientIp}
-    table(style='border:thin solid; border-collapse:collapse; border-color:#0000CC')
+    table(style='font-size:14px; border:thin solid; border-collapse:collapse; border-color:#0000CC')
       tr
-        td(colspan='2', style='border:thin solid; border-color:#0000CC; background-color:#CCCCFF') 
-          | #[span.bold Headers] #[i (server side proxy headers in italics)]
+        td(colspan='2', style='border:thin solid; border-color:#0000CC; background-color:#CCCCFF; font-weight:bold') 
+          | Client Headers
       each val, index in headers
         tr
-          if (index == "x-forwarded-for")
-            td(style='border:thin solid; border-color:#0000CC; font-style: italic')= index
-            td(style='border:thin solid; border-color:#0000CC; font-style: italic; color:#0000CC')= val
-          else
-            td(style='border:thin solid; border-color:#0000CC')= index
-            td(style='border:thin solid; border-color:#0000CC')= val
+          td(style='border:thin solid; border-color:#0000CC')= index
+          td(style='border:thin solid; border-color:#0000CC')= val
+      tr
+        td(colspan='2', style='border:thin solid; border-color:#0000CC; background-color:#CCCCFF; font-weight:bold') 
+          | Connection
+      each val, index in connection
+        tr
+          td(style='border:thin solid; border-color:#0000CC')= index
+          td(style='border:thin solid; border-color:#0000CC')= val
+      //- if (connection.protocol == 'https')
+      //-  tr
+      //-    td(style='border:thin solid; border-color:#0000CC') sharedSigalgs
+      //-    td= sharedalgs.join(', ')
     h2 Usage:
     ul 
       li #[span.code myip.blue] is available over http/80 or https/443, and resolves to
