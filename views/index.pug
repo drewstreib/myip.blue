@@ -45,9 +45,11 @@ html(lang="en")
             li #[span.code v4.myip.blue] only resolves ipv4.
             li #[span.code v6.myip.blue] only resolves ipv6.
             li #[span.code myip.blue/json] returns json-formatted output.
-            li If #[span.code user-agent] begins with '#[span.code curl]' or '#[span.code wget]' at #[span.code /], output is limited
-                |  to a simple text string of the client IP address. For more detailed
-                |  information while using curl, use the #[span.code /json] endpoint.
+            li #[span.code myip.blue/ip] returns only a text string of the client IP address.
+            ul
+                li If #[span.code user-agent] begins with '#[span.code curl]' or '#[span.code wget]' at #[span.code /],
+                    |  the behavior also defaults to the simple text string. For more detailed
+                    |  information while using curl, use the #[span.code /json] endpoint.
         
         p The #[b only] source for authentic blue IP addresses. 
             |  Hosted by #[a(href="https://alt.org") alt.org]. Dedicated to the real #[a(href="/static/blue.jpg") Blue].

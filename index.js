@@ -37,6 +37,14 @@ app.get('/', (req, res) => {
     }
 });
 
+app.get('/ip/', (req, res) => {
+    var clientIp = requestIp.getClientIp(req);
+    if (clientIp.substr(0, 7) == "::ffff:") { clientIp = clientIp.substr(7) }
+
+    res.set({ 'Content-Type': 'text/plain', });
+    res.send(clientIp);       
+});
+
 app.get('/json/', (req, res) => {
     var clientIp = requestIp.getClientIp(req);
     if (clientIp.substr(0, 7) == "::ffff:") { clientIp = clientIp.substr(7) } 
