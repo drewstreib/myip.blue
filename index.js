@@ -1,4 +1,3 @@
-//const bodyParser = require('body-parser');
 const express = require('express');
 const nocache = require('nocache');
 const requestIp = require('request-ip');
@@ -6,52 +5,45 @@ const requestIp = require('request-ip');
 const app = express();
 const port = 8080;
 
-//app.use(bodyParser.json());
 app.use(nocache());
 app.use('/static', express.static('static'))
 app.set('views', './views');
 app.set('view engine', 'pug');
 
-function deforward(headers) {
-    var nh = { ...headers };
-    delete nh['host'];
-    return nh;
-}
+// since we're going through proxy, this host header is meaningless
+app.use(function (req, res, next) {
+    delete req.headers['host'];
+    var myip = requestIp.getClientIp(req);
+    if (myip.substr(0, 7) == "::ffff:") { myip = myip.substr(7); }
+    req.myip = myip;
+    next();
+});
 
 app.get('/', (req, res) => {
-    var clientIp = requestIp.getClientIp(req);
-    if (clientIp.substr(0, 7) == "::ffff:") { clientIp = clientIp.substr(7) }
-
     out = {
-        "clientIp": clientIp,
-        "headers": deforward(req.headers)
+        "clientIp": req.myip,
+        "headers": req.headers
     }
 
     // send plain response for some agents
     do_plain = [ 'curl', 'wget' ]; 
     if (do_plain.includes(req.header('User-Agent').substr(0, 4))) {
         res.set({ 'Content-Type': 'text/plain', });
-        res.send(clientIp);       
+        res.send(req.myip);       
     } else {
         res.render('index', out);
     }
 });
 
 app.get('/ip/', (req, res) => {
-    var clientIp = requestIp.getClientIp(req);
-    if (clientIp.substr(0, 7) == "::ffff:") { clientIp = clientIp.substr(7) }
-
     res.set({ 'Content-Type': 'text/plain', });
-    res.send(clientIp);       
+    res.send(req.myip);       
 });
 
 app.get('/json/', (req, res) => {
-    var clientIp = requestIp.getClientIp(req);
-    if (clientIp.substr(0, 7) == "::ffff:") { clientIp = clientIp.substr(7) } 
-
     out = {
-        "clientIp": clientIp,
-        "headers": deforward(req.headers)
+        "clientIp": req.myip,
+        "headers": req.headers
     }
     res.header("Content-Type",'application/json');
     res.json(out);
