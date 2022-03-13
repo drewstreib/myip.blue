@@ -1,0 +1,49 @@
+doctype html
+html(lang="en")
+    head
+        title myip.blue - Because IP addresses are blue!
+        style.
+            body {
+                font-family: Verdana;
+            }
+            .blue {
+                color: #0000CC;
+            }
+            .code {
+                font-family: Courier New;
+                font-weight: bold;
+                color: #0000CC;
+            }
+            
+    body
+        h1 myip.blue - Because IP addresses are blue!
+        h1 Your IP address: 
+            span.blue(style="display:inline") #{clientIp}
+        table(style='border:thin solid; border-collapse:collapse; border-color:#0000CC')
+            tr
+                td(colspan='2', style='border:thin solid; border-color:#0000CC; background-color:#CCCCFF; font-weight:bold') Headers
+            each val, index in headers
+                tr
+                    if (index.substr(0, 12) == "x-forwarded-")
+                        td(style='border:thin solid; border-color:#0000CC; font-style: italic')= index
+                    else
+                        td(style='border:thin solid; border-color:#0000CC')= index
+                    if (index == 'x-forwarded-for')
+                        td(style='border:thin solid; border-color:#0000CC; font-style: italic; color:#0000CC')= val
+                    else if (index.substr(0, 12) == "x-forwarded-")
+                        td(style='border:thin solid; border-color:#0000CC; font-style: italic')= val
+                    else
+                        td(style='border:thin solid; border-color:#0000CC')= val
+        h2 Usage:
+        ul 
+            li #[span.code myip.blue] is available over http/80 or https/443, and resolves to
+                |  ipv4 and ipv6 addresses. 
+            li #[span.code v4.myip.blue] only resolves ipv4.
+            li #[span.code v6.myip.blue] only resolves ipv6.
+            li #[span.code myip.blue/json] returns json-formatted output.
+            li If #[span.code user-agent] begins with '#[span.code curl]' or '#[span.code wget]' at #[span.code /], output is limited
+                |  to a simple text string of the client IP address. For more detailed
+                |  information while using curl, use the #[span.code /json] endpoint.
+        
+        p The #[b only] source for authentic blue IP addresses. 
+            |  Hosted by #[a(href="https://alt.org") alt.org].
