@@ -7,8 +7,8 @@ const port = 8080;
 const port_https = 8081;
 
 const https_options = {
-  key: fs.readFileSync("key.pem"),
-  cert: fs.readFileSync("chain.pem"),
+  key: fs.readFileSync("/key.pem"),
+  cert: fs.readFileSync("/chain.pem"),
 };
 
 const app = express();
