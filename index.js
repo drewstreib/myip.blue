@@ -49,5 +49,9 @@ app.get('/json/', (req, res) => {
     res.json(out);
 });
 
+app.use((req, res, next) => {
+  res.status(404).send("Sorry! Blue can't find that!")
+})
+
 app.listen(port, () => console.log(`***** app listening on port ${port}!`));
 
