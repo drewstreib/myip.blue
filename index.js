@@ -8,6 +8,7 @@ const port = 8080;
 
 //app.use(bodyParser.json());
 app.use(nocache());
+app.use('/static', express.static('static'))
 app.set('views', './views');
 app.set('view engine', 'pug');
 
