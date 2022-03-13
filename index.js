@@ -46,6 +46,9 @@ app.use(function (req, res, next) {
     req.myconn["remoteFamily"] = "IPv6";
   }
   req.myip = myip;
+
+  var d = new Date().toISOString();
+  console.log(`${d} - ${req.myip} ${req.headers['host']} ${req.url}`);
   next();
 });
 
