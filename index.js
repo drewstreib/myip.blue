@@ -10,9 +10,11 @@ app.use('/static', express.static('static'))
 app.set('views', './views');
 app.set('view engine', 'pug');
 
-// since we're going through proxy, this host header is meaningless
 app.use(function (req, res, next) {
+    // since we're going through proxy, this host header is meaningless
     delete req.headers['host'];
+
+    // the proxy can cause ipv4 addresses in ipv6 notation. this fixes it.
     var myip = requestIp.getClientIp(req);
     if (myip.substr(0, 7) == "::ffff:") { myip = myip.substr(7); }
     req.myip = myip;
