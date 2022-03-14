@@ -3,8 +3,8 @@ const fs = require("fs");
 const https = require("https");
 const nocache = require("nocache");
 
-const port = 8080;
-const port_https = 8081;
+const port = 80;
+const port_https = 443;
 
 const https_options = {
   key: fs.readFileSync("/key.pem"),
@@ -25,8 +25,8 @@ app.use(function (req, res, next) {
       remotePort: req.socket.remotePort,
       tlsProtocol: req.socket.getProtocol(),
       cipherName: req.socket.getCipher()["name"],
-      cipherStandardName: req.socket.getCipher()["standardName"],
-      cipherMinVersion: req.socket.getCipher()["version"],
+      cipherStandardName: req.socket.getCipher()["standardName"]
+      //cipherMinVersion: req.socket.getCipher()["version"],
     };
     // req.mysharedalgs = req.socket.getSharedSigalgs();
   } else {
@@ -38,7 +38,7 @@ app.use(function (req, res, next) {
   }
 
   // ipv4 addresses are in ipv6 notation. this fixes it.
-  var myip = req.ip;
+  var myip = req.socket.remoteAddress;
   if (myip.substr(0, 7) == "::ffff:") {
     myip = myip.substr(7);
     req.myconn["remoteFamily"] = "IPv4";
@@ -48,7 +48,7 @@ app.use(function (req, res, next) {
   req.myip = myip;
 
   var d = new Date().toISOString();
-  console.log(`${d} - ${req.myip} ${req.headers['host']} ${req.url}`);
+  console.log(`${d} - ${req.myip} ${req.myconn['protocol']} ${req.headers['host']} ${req.url} "${req.headers['user-agent']}"`);
   next();
 });
 
@@ -62,7 +62,7 @@ app.get("/", (req, res) => {
 
   // send plain response for some agents
   do_plain = ["curl", "wget"];
-  if (do_plain.includes(req.header("User-Agent").substr(0, 4))) {
+  if (req.header("User-Agent") && (do_plain.includes(req.header("User-Agent").substr(0, 4)))) {
     res.set({ "Content-Type": "text/plain" });
     res.send(req.myip);
   } else {
@@ -78,6 +78,7 @@ app.get("/ip/", (req, res) => {
 app.get("/json/", (req, res) => {
   out = {
     clientIp: req.myip,
+    clientIps: req.ips,
     headers: req.headers,
     connection: req.myconn,
   };
