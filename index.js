@@ -13,7 +13,6 @@ const https_options = {
 
 const app = express();
 app.use(nocache());
-app.use("/static", express.static("static"));
 app.set("views", "./views");
 app.set("view engine", "pug");
 
@@ -51,6 +50,9 @@ app.use(function (req, res, next) {
   console.log(`${d} - ${req.myip} ${req.myconn['protocol']} ${req.headers['host']} ${req.url} "${req.headers['user-agent']}"`);
   next();
 });
+
+// static after custom function so that we log static requests
+app.use("/static", express.static("static"));
 
 app.get("/", (req, res) => {
   out = {
