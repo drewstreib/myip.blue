@@ -5,7 +5,6 @@ html(lang="en")
     style.
       body {
         font-family: Verdana;
-        text-size-adjust: 80%;
       }
       .blue {
         color: #0000CC;
@@ -23,7 +22,7 @@ html(lang="en")
     h1 myip.blue - Because IP addresses are blue!
     h1 Your public IP address: 
       span.blue(style="display:inline") #{clientIp}
-    table(style='font-size:14px; border:thin solid; border-collapse:collapse; border-color:#0000CC')
+    table(style='border:thin solid; border-collapse:collapse; border-color:#0000CC')
       tr
         td(colspan='2', style='border:thin solid; border-color:#0000CC; background-color:#CCCCFF; font-weight:bold') 
           | Client Headers
