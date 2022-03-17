@@ -25,9 +25,7 @@ app.use(function (req, res, next) {
       tlsProtocol: req.socket.getProtocol(),
       cipherName: req.socket.getCipher()["name"],
       cipherStandardName: req.socket.getCipher()["standardName"]
-      //cipherMinVersion: req.socket.getCipher()["version"],
     };
-    // req.mysharedalgs = req.socket.getSharedSigalgs();
   } else {
     req.myconn = {
       protocol: "http",
@@ -80,13 +78,9 @@ app.get("/ip/", (req, res) => {
 app.get("/json/", (req, res) => {
   out = {
     clientIp: req.myip,
-    clientIps: req.ips,
     headers: req.headers,
     connection: req.myconn,
   };
-  /* if (req.myconn.protocol == "https") {
-    out.connection["sharedSigalgs"] = req.mysharedalgs;
-  } */
   res.header("Content-Type", "application/json");
   res.json(out);
 });
