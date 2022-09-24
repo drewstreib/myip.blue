@@ -2,6 +2,8 @@ const express = require("express");
 const fs = require("fs");
 const https = require("https");
 const nocache = require("nocache");
+// for /test/
+const got = require('got');
 
 const port = 80;
 const port_https = 443;
@@ -84,6 +86,41 @@ app.get("/json/", (req, res) => {
   res.header("Content-Type", "application/json");
   res.json(out);
 });
+
+// test endpoint for checking connectivity to another site
+
+app.get("/test/:host", async (req, res) => {
+  let out = { initial: "Initial" };
+  const options = {
+	  timeout: {
+		  lookup: 500,
+	  	connect: 500,
+		  secureConnect: 500,
+		  socket: 1000,
+		  send: 3000,
+		  response: 3000
+    }
+	};
+  try {
+    response = await got(`${req.params.host}`,options);
+    out = { 
+      requestUrl: response.requestUrl,
+      redirectUrls: response.redirectUrls,
+      finalUrl: response.url,
+      ip: response.ip,
+      ok: response.ok,
+      statusCode: response.statusCode
+    };
+  } catch (error) {
+    out = { 
+      url: req.params.host,
+      error: error
+    };
+  }
+  res.header("Content-Type", "application/json");
+  res.json(out);
+});
+
 
 app.use((req, res, next) => {
   res.status(404).send("Sorry! Blue can't find that!");
