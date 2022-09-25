@@ -28,5 +28,3 @@ jobs:
           builder: ${{ steps.buildx.outputs.name }}
           push: true
           tags: ${{ secrets.DOCKER_HUB_USERNAME }}/myip.blue:latest
-          cache-from: type=registry,ref=${{ secrets.DOCKER_HUB_USERNAME }}/myip.blue:buildcache
-          cache-to: type=registry,ref=${{ secrets.DOCKER_HUB_USERNAME }}/myip.blue:buildcache,mode=max
