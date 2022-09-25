@@ -14,7 +14,7 @@
     "body-parser": "*",
     "express": "*",
     "fs": "*",
-    "got": "11",
+    "got": ">=11.8.5 <12",
     "https": "*",
     "nocache": "*",
     "pug": "*",

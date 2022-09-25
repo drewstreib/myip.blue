@@ -99,7 +99,10 @@ app.get("/test/:host", async (req, res) => {
 		  socket: 1000,
 		  send: 3000,
 		  response: 3000
-    }
+    },
+    followRedirect: false,
+    throwHttpErrors: false,
+    retry: { limit: 0 }
 	};
   try {
     response = await got(`${req.params.host}`,options);
@@ -109,7 +112,8 @@ app.get("/test/:host", async (req, res) => {
       finalUrl: response.url,
       ip: response.ip,
       ok: response.ok,
-      statusCode: response.statusCode
+      statusCode: response.statusCode,
+      timings: { phases: response.timings.phases }
     };
   } catch (error) {
     out = { 
