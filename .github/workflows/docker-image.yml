@@ -12,6 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - 
+        name: set NOW
+        run: |
+          echo "::set-env name=NOW::$(date +'%Y%m%d-%H%M')"
+      - 
         uses: actions/checkout@v3
       -
         name: Login to Docker Hub
@@ -27,4 +31,6 @@ jobs:
           file: ./Dockerfile
           builder: ${{ steps.buildx.outputs.name }}
           push: true
-          tags: ${{ secrets.DOCKER_HUB_USERNAME }}/myip.blue:latest
+          tags: 
+            - ${{ secrets.DOCKER_HUB_USERNAME }}/myip.blue:latest
+            - ${{ secrets.DOCKER_HUB_USERNAME }}/myip.blue:${{ env.NOW }}
