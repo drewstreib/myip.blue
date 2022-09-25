@@ -31,6 +31,4 @@ jobs:
           file: ./Dockerfile
           builder: ${{ steps.buildx.outputs.name }}
           push: true
-          tags: 
-            - ${{ secrets.DOCKER_HUB_USERNAME }}/myip.blue:latest
-            - ${{ secrets.DOCKER_HUB_USERNAME }}/myip.blue:${{ env.NOW }}
+          tags: ${{ secrets.DOCKER_HUB_USERNAME }}/myip.blue:latest
