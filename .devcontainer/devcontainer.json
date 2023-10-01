@@ -1,0 +1,4 @@
+{
+    "name": "dssh devcontainer",
+    "image": "node:16"
+}
