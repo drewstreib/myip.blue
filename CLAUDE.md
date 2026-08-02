@@ -34,8 +34,9 @@ Doc conventions in full → **`/d:docs`**, which also runs the end-of-session pa
 
 ## 🚦 Guardrails
 
-- 🛑 **Pushing `main` is a DEPLOY, not a save.** `.github/workflows/docker-image.yml` fires on push to `main` and publishes a container image. Land work on a branch; **pushing `main` needs Drew's go.**
-- 🛑 **The running production service is the rollback.** It runs from a **locally-built image on the host** that predates all of this. Do not delete, retag or prune it — until a new deploy is proven, that image is the only way back.
+- ✅ **Pushing `main` is safe — it publishes an image, it does NOT deploy** (Drew, 2026-08-02: *"you own the tree… you're not affecting prod myip.blue by changing it now"*). The origin runs a **locally-built image it never pulls**, so nothing reaches production until someone deliberately changes that. Commit and push freely.
+- 🛑 **Deploying IS the separate, gated step** — that's when the origin starts pulling this image. Drew's go, and the procedure is in the control repo.
+- 🛑 **The running production service is the rollback.** It runs from that locally-built image, predating all of this. Do not delete, retag or prune it — until a new deploy is proven, it is the only way back.
 - ⚠️ **Never edit the tree on the production host.** The host's copy had drifted from git for years (captured 2026-08-02, `163ed2f`). This checkout is the working tree; the host is a deploy target.
 - ⚠️ **Two front doors, one service.** `myip.blue` is served **direct from the origin** — that is deliberate and load-bearing, because reporting the client's *real* TLS cipher/protocol and source port only works on a direct connection. `cf.myip.blue` is the *through-Cloudflare* view on purpose. **Never put the apex behind a proxy** — it silently guts the app's whole point: every client would see Cloudflare's TLS and Cloudflare's address.
 
