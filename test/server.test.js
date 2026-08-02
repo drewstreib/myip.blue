@@ -354,3 +354,35 @@ test("paths are case-sensitive — no lenient aliases", async () => {
     assert.equal((await get(p)).status, 200, p);
   }
 });
+
+test("slow/incomplete requests are cut off quickly (DoS timeouts)", async () => {
+  // Open a socket, send a partial request line and then nothing. Node must give
+  // up on headersTimeout (4s) rather than holding the socket for its 60s
+  // default. Budget 8s so the test is not flaky on a loaded machine.
+  const net = await import("node:net");
+  const started = Date.now();
+  const closed = await new Promise((resolve) => {
+    const sock = net.connect(PORT, "127.0.0.1", () => sock.write("GET /ip HTTP/1.1\r\n"));
+    sock.on("close", () => resolve(true));
+    sock.on("error", () => resolve(true));
+    setTimeout(() => { sock.destroy(); resolve(false); }, 8000);
+  });
+  const elapsed = Date.now() - started;
+  assert.ok(closed, "server must close an incomplete request");
+  // ~5s expected. Budget 8s so it is not flaky on a loaded machine, but this
+  // WILL catch a regression to Node's 60s+ defaults.
+  assert.ok(elapsed < 8000, `must close promptly (took ${elapsed}ms)`);
+});
+
+test("the container healthcheck script passes against a live server, fails without one", async () => {
+  const { execFile } = await import("node:child_process");
+  const run = (env) =>
+    new Promise((resolve) => {
+      execFile(process.execPath, ["lib/healthcheck.js"], { env: { ...process.env, ...env } }, (err) =>
+        resolve(err ? err.code ?? 1 : 0),
+      );
+    });
+  assert.equal(await run({ HTTP_PORT: String(PORT) }), 0, "must pass against the running server");
+  // Nothing listening here -> must fail, or the healthcheck is decorative.
+  assert.notEqual(await run({ HTTP_PORT: "1" }), 0, "must fail when nothing is listening");
+});

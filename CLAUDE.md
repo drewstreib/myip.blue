@@ -124,6 +124,9 @@ Canonical doc files, when this repo needs them: **`TODO.md`** (active work, `## 
 
 ## Gotchas
 
+- 🛑 **`server.timeout` is the only timeout that actually protects this service.** Measured on the production host with the production node (v22.22.0, 2026-08-02): a socket that opens and sends a partial request line is held **indefinitely** when only `requestTimeout` and `headersTimeout` are set — still open at 15 s. With `server.timeout` it closes on the dot. Node's docs present the other two as the DoS protection for a server with no reverse proxy, and for *this* case they do nothing. All four are set (5 s / 5 s / 4 s / 5 s); **do not "tidy up" `server.timeout` on the grounds that the documented ones cover it.**
+- ⚠️ **Container `HEALTHCHECK` must be exec-form and name node by absolute path.** Distroless has no shell, so `HEALTHCHECK CMD curl …` is impossible, and `HEALTHCHECK` does **not** inherit `ENTRYPOINT` — hence `["/nodejs/bin/node", "/app/lib/healthcheck.js"]`.
+
 - 🛑 **The Mac's `node` is v20; this project targets 22. Verify on 22 before trusting a green run:** `docker run --rm -v "$PWD:/app" -w /app node:22-slim npm test`. **This already bit once** — `"test": "node --test test/"` passed on Node 20 and failed on 22, which resolves the directory as a *module path* (`Cannot find module …/test`). `node --test` with no argument auto-discovers and works on both.
 - **Run it locally: `npm run dev`** (8080/8443) or `node index.js`. **TLS is optional** — if the cert files are unreadable it logs a warning and serves HTTP only. That is deliberate: the previous version read certs by absolute path at *module load* and died with `ENOENT` before the server existed, so it could never be run outside a container.
 - ⚠️ **Certs are still read once at startup**, so a renewal needs a restart — and with no reverse proxy in front, that restart is user-visible downtime. Unavoidable in-process; it is a deploy-shape problem, handled in the control repo.

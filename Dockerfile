@@ -23,9 +23,17 @@ COPY index.js ./
 COPY lib ./lib
 COPY static ./static
 
-# ⚠️ Runs as non-root. Binding 80/443 therefore needs NET_BIND_SERVICE granted
-# by the runtime (compose: cap_add), or HTTP_PORT/HTTPS_PORT set above 1024.
-# The old image ran as root purely to bind those ports.
+# The base image's USER is 65532 (nonroot). ⚠️ In production compose overrides
+# this to uid 0 with `cap_drop: ALL` + `cap_add: NET_BIND_SERVICE`, because
+# Docker grants no AMBIENT capabilities — a non-root process never gets the cap
+# in its effective set and binding 80/443 fails EACCES. Running here as non-root
+# is fine only on ports above 1024.
 EXPOSE 80 443
+
+# Exec form is required: distroless has no shell, so the usual
+# `HEALTHCHECK CMD curl ...` is impossible. HEALTHCHECK does not inherit
+# ENTRYPOINT, hence the absolute path to node.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD ["/nodejs/bin/node", "/app/lib/healthcheck.js"]
 
 CMD ["index.js"]

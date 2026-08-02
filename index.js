@@ -319,9 +319,30 @@ function loadTls() {
   }
 }
 
+// 🛑 Aggressive on purpose. This service answers in well under a millisecond, so
+// 5s is already catastrophic-failure territory, not a slow client. Node's
+// defaults (headersTimeout 60s, requestTimeout 5min, keepAliveTimeout 65s) are
+// sized for a server behind a reverse proxy — there is none here, node faces the
+// internet directly on a 405MB box, and Node's own docs say both timeouts must
+// be non-zero in exactly that situation.
+function tune(server) {
+  // 🛑 server.timeout IS THE ONE THAT ACTUALLY WORKS. Measured on the production
+  // host with the production node (v22.22.0, 2026-08-02): a socket that opens
+  // and sends only "GET /ip HTTP/1.1\r\n" is held **indefinitely** with
+  // requestTimeout and headersTimeout set and server.timeout unset — still open
+  // at 15s. With server.timeout it closes on the dot. Same result in a Linux
+  // container on macOS, so it is not a Docker-networking artifact.
+  // Setting only the two documented "DoS" timeouts would be decorative.
+  server.timeout = 5000; // socket inactivity — the effective protection
+  server.requestTimeout = 5000; // defence in depth: whole request must complete
+  server.headersTimeout = 4000; // defence in depth; MUST be < requestTimeout
+  server.keepAliveTimeout = 5000; // idle between keep-alive requests (default 65s)
+  return server;
+}
+
 const servers = [];
 
-const httpServer = http.createServer(handler(false));
+const httpServer = tune(http.createServer(handler(false)));
 httpServer.listen(HTTP_PORT, () =>
   console.log(`${new Date().toISOString()} - http listening on ${HTTP_PORT}`),
 );
@@ -331,7 +352,7 @@ const tls = loadTls();
 if (tls) {
   // Certs are read once here. A renewal needs a restart — there is no reverse
   // proxy in front, so that restart is user-visible downtime.
-  const httpsServer = https.createServer(tls, handler(true));
+  const httpsServer = tune(https.createServer(tls, handler(true)));
   httpsServer.listen(HTTPS_PORT, () =>
     console.log(`${new Date().toISOString()} - https listening on ${HTTPS_PORT}`),
   );
