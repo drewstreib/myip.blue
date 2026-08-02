@@ -386,3 +386,29 @@ test("the container healthcheck script passes against a live server, fails witho
   // Nothing listening here -> must fail, or the healthcheck is decorative.
   assert.notEqual(await run({ HTTP_PORT: "1" }), 0, "must fail when nothing is listening");
 });
+
+test("timestamp is UTC even when the process timezone is not", async () => {
+  // The service advertises its timestamp as a clock reference, so UTC must be a
+  // guarantee rather than a consequence of the host happening to run UTC.
+  // Asia/Tokyo is +9: if anything ever switches to a local-time formatter, the
+  // hour will be visibly wrong here.
+  const tzPort = PORT + 1;
+  const proc = spawn(process.execPath, ["index.js"], {
+    env: { ...process.env, TZ: "Asia/Tokyo", HTTP_PORT: String(tzPort), TLS_KEY: "/x", TLS_CERT: "/x" },
+    stdio: "ignore",
+  });
+  try {
+    let body;
+    for (let i = 0; i < 50; i++) {
+      try { body = await (await fetch(`http://127.0.0.1:${tzPort}/json`)).json(); break; }
+      catch { await new Promise((r) => setTimeout(r, 100)); }
+    }
+    assert.ok(body, "TZ-shifted server did not start");
+    assert.match(body.timestamp, /Z$/, "must be Zulu/UTC, not a local-time offset");
+    const skew = Math.abs(Date.parse(body.timestamp) - Date.now());
+    // A local-time formatter under Asia/Tokyo would be 9 hours out.
+    assert.ok(skew < 60_000, `timestamp must track real UTC (skew ${skew}ms)`);
+  } finally {
+    proc.kill("SIGTERM");
+  }
+});
