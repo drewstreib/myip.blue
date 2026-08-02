@@ -1,23 +1,18 @@
 {
   "name": "myip.blue",
-  "version": "1",
+  "version": "2.0.0",
+  "description": "Connection diagnostics: what your IP, headers and TLS look like from the outside.",
+  "type": "module",
   "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node index.js"
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
   },
-  "author": "",
-  "license": "",
-  "keywords": [],
-  "description": "",
-  "dependencies": {
-    "body-parser": "*",
-    "express": "*",
-    "fs": "*",
-    "got": ">=11.8.5 <12",
-    "https": "*",
-    "nocache": "*",
-    "pug": "*",
-    "request-ip": "*"
-  }
+  "scripts": {
+    "start": "node index.js",
+    "dev": "HTTP_PORT=8080 HTTPS_PORT=8443 node index.js",
+    "test": "node --test test/"
+  },
+  "dependencies": {}
 }
