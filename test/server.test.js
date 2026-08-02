@@ -315,3 +315,42 @@ test("scripting clients get JSON, including ones that impersonate Mozilla", asyn
     assert.match(res.headers.get("content-type"), /application\/json/, `${name} must get JSON`);
   }
 });
+
+test("CORS is open on every response", async () => {
+  for (const path of ["/", "/ip", "/json", "/html", "/docs", "/llms.txt", "/robots.txt", "/nope"]) {
+    const res = await get(path);
+    assert.equal(res.headers.get("access-control-allow-origin"), "*", path);
+  }
+});
+
+test("OPTIONS preflight succeeds instead of 405", async () => {
+  const res = await get("/", { method: "OPTIONS" });
+  assert.equal(res.status, 204);
+  assert.equal(res.headers.get("access-control-allow-origin"), "*");
+  assert.match(res.headers.get("access-control-allow-methods"), /GET/);
+  assert.match(res.headers.get("allow"), /GET, HEAD, OPTIONS/);
+});
+
+test("/robots.txt is permissive and points at the machine-readable docs", async () => {
+  const res = await get("/robots.txt");
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type"), /text\/plain/);
+  const body = await res.text();
+  assert.match(body, /User-agent: \*/);
+  assert.match(body, /Allow: \//);
+  assert.match(body, /llms\.txt/);
+  assert.ok(!/Disallow: \/\s*$/m.test(body), "must not disallow everything");
+});
+
+test("fixed routes forgive case; /static does NOT", async () => {
+  for (const p of ["/JSON", "/Json", "/IP", "/Docs", "/LLMS.TXT", "/HTML", "/Robots.txt"]) {
+    assert.equal((await get(p)).status, 200, `${p} should resolve`);
+  }
+  // The case-folding must not reach /static — assert on the PREFIX, which is
+  // ours, not on the filename, which is the filesystem's.
+  // ⚠️ Do NOT assert /static/BLUE.JPG 404s: macOS (APFS) is case-INSENSITIVE by
+  // default and would serve it, while the Linux host would not. That assertion
+  // tests the OS, not this code, and fails only on a developer Mac.
+  assert.equal((await get("/STATIC/blue.jpg")).status, 404, "the /static prefix must stay case-sensitive");
+  assert.equal((await get("/static/blue.jpg")).status, 200);
+});

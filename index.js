@@ -21,7 +21,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderPage } from "./lib/page.js";
-import { DOCS, DOCS_URL } from "./lib/docs.js";
+import { DOCS, DOCS_URL, ROBOTS } from "./lib/docs.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -117,6 +117,11 @@ function send(res, status, type, body, extraHeaders = {}) {
     Expires: "0",
     "Surrogate-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
+    // Everything here describes the caller and is already known to them, and no
+    // credentials or cookies are involved — so "*" gives up nothing and lets
+    // browser-based tooling actually read the response. Without it the
+    // same-origin policy blocks every in-page caller.
+    "Access-Control-Allow-Origin": "*",
     ...extraHeaders,
   });
   res.end(body);
@@ -199,6 +204,18 @@ async function route(req, res, isTls) {
   const urlPath = new URL(req.url, "http://placeholder").pathname;
   const payload = { clientIp, headers: req.headers, connection };
 
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      Allow: "GET, HEAD, OPTIONS",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+      "Access-Control-Allow-Headers": "Accept, Content-Type",
+      "Access-Control-Max-Age": "86400",
+    });
+    res.end();
+    return { status: 204, clientIp, connection };
+  }
+
   if (req.method !== "GET" && req.method !== "HEAD") {
     send(res, 405, "text/plain; charset=utf-8", "Sorry! Blue can't find that!", {
       Allow: "GET, HEAD",
@@ -222,8 +239,14 @@ async function route(req, res, isTls) {
       2,
     ) + "\n";
 
+  // Fixed routes match case-insensitively — /JSON and /Docs work. Undocumented
+  // on purpose: it forgives a typo, it is not a second spelling to advertise.
+  // ⚠️ NOT applied to /static/, which resolves against a case-sensitive
+  // filesystem; loosening it there buys nothing and invites path confusion.
+  const p = urlPath.toLowerCase();
+
   let status;
-  if (urlPath === "/" || urlPath === "") {
+  if (p === "/" || p === "") {
     const form = preferredForm(req);
     if (form === "html") {
       send(res, 200, "text/html; charset=utf-8", renderPage(payload));
@@ -233,21 +256,24 @@ async function route(req, res, isTls) {
       send(res, 200, "application/json; charset=utf-8", jsonBody());
     }
     status = 200;
-  } else if (urlPath === "/ip" || urlPath === "/ip/") {
+  } else if (p === "/ip" || p === "/ip/") {
     send(res, 200, "text/plain; charset=utf-8", clientIp + "\n");
     status = 200;
-  } else if (urlPath === "/json" || urlPath === "/json/") {
+  } else if (p === "/json" || p === "/json/") {
     send(res, 200, "application/json; charset=utf-8", jsonBody());
     status = 200;
-  } else if (urlPath === "/html" || urlPath === "/html/") {
+  } else if (p === "/html" || p === "/html/") {
     // Forces the page regardless of what the client asked for. Completes the
     // set: /ip, /json and /html each pin one form, and `/` negotiates.
     send(res, 200, "text/html; charset=utf-8", renderPage(payload));
     status = 200;
-  } else if (urlPath === "/docs" || urlPath === "/docs/" || urlPath === "/llms.txt") {
+  } else if (p === "/docs" || p === "/docs/" || p === "/llms.txt") {
     // Markdown served as text/plain on purpose: it renders readably raw, and a
     // machine gets the whole contract in one cheap request with no HTML to strip.
     send(res, 200, "text/plain; charset=utf-8", DOCS);
+    status = 200;
+  } else if (p === "/robots.txt") {
+    send(res, 200, "text/plain; charset=utf-8", ROBOTS);
     status = 200;
   } else if (urlPath.startsWith("/static/")) {
     status = await serveStatic(req, res, urlPath);
