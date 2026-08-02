@@ -94,6 +94,7 @@ Canonical doc files, when this repo needs them: **`TODO.md`** (active work, `## 
 
 ## Gotchas
 
+- 🛑 **The Mac's `node` is v20; this project targets 22. Verify on 22 before trusting a green run:** `docker run --rm -v "$PWD:/app" -w /app node:22-slim npm test`. **This already bit once** — `"test": "node --test test/"` passed on Node 20 and failed on 22, which resolves the directory as a *module path* (`Cannot find module …/test`). `node --test` with no argument auto-discovers and works on both.
 - **Run it locally: `npm run dev`** (8080/8443) or `node index.js`. **TLS is optional** — if the cert files are unreadable it logs a warning and serves HTTP only. That is deliberate: the previous version read certs by absolute path at *module load* and died with `ENOENT` before the server existed, so it could never be run outside a container.
 - ⚠️ **Certs are still read once at startup**, so a renewal needs a restart — and with no reverse proxy in front, that restart is user-visible downtime. Unavoidable in-process; it is a deploy-shape problem, handled in the control repo.
 - ⚠️ **Routes must accept both `/ip` and `/ip/`.** Express matched both by default; this implementation matches them explicitly. Drop one and you silently break existing callers.
