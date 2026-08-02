@@ -1,6 +1,6 @@
 # myip.blue
 
-Small Express service: tells you your public IP, plus the headers and TLS details of how you connected. Live at **myip.blue** (+ `v4.` / `v6.` / `cf.`), hosted by alt.org.
+Small zero-dependency Node service: tells you your public IP, plus the headers and TLS details of how you connected. Live at **myip.blue** (+ `v4.` / `v6.` / `cf.`), hosted by alt.org.
 
 **This file is the signpost.** Loaded every session in this subtree. Keep it terse and current.
 
@@ -12,7 +12,7 @@ Small Express service: tells you your public IP, plus the headers and TLS detail
 
 **Never write here:** hostnames or IPs of the origin fleet · SSH users, key paths, container/user IDs · registry or cloud credentials, even redacted · log destinations, monitoring endpoints, account numbers · anything about *other* alt.org services · vulnerability detail for an unfixed bug in this app.
 
-**That material lives in `DrewHome/docs/myip-blue-app.md` and `DrewHome/docs/hosts/myip.md`** — the private control repo. Write host/deploy/security-posture facts *there*, and reference them here only as "see the control repo", never by content.
+**That material lives in `DrewHome/docs/myip.blue.md` (the single ops home) and `DrewHome/docs/hosts/myip.md`** — the private control repo. Write host/deploy/security-posture facts *there*, and reference them here only as "see the control repo", never by content.
 
 ⚠️ The rule is not "don't write secrets" — it is **don't write operational detail**. A hostname is not a secret and is still a gift to someone probing the box. When unsure which repo a fact belongs in: **it goes in the private one.**
 
@@ -22,7 +22,7 @@ Small Express service: tells you your public IP, plus the headers and TLS detail
 
 **Every doc here is written by Claude, for a future Claude session.** Drew handed this repo over on **2026-08-02**: *"you can own that myip.blue repo and start its own CLAUDE.md, etc."* Same terms as DrewHome:
 
-- **You don't need permission to fix your own repo.** Restructure, rename, correct, delete stale content — do it, commit, push (but see the push guardrail below — pushing here is a *deploy*, not a save).
+- **You don't need permission to fix your own repo.** Restructure, rename, correct, delete stale content — do it, commit, push.
 - **Policy and direction are Drew's.** Ordinary work inside an agreed decision is yours. Changing what the service *does*, its public surface, or its deploy model is his call. **Recommend and wait.**
 - **A stale or wrong doc is your bug.** Nobody else reviews these.
 
@@ -44,24 +44,23 @@ Doc conventions in full → **`/d:docs`**, which also runs the end-of-session pa
 
 ## What it does — the functional contract
 
-The revamp must preserve **all** of this. Verified by reading the source 2026-08-02.
+**This is a DIAGNOSTIC tool** (Drew, 2026-08-02) — including for LLM agents, which is why the JSON matters as much as the page. The contract below is preserved from the original and must stay preserved.
 
 | Route | Behaviour |
 |---|---|
-| `GET /` | HTML page (pug): client IP, full request headers, connection details. **If `User-Agent` starts with `curl` or `wget` (first 4 chars), returns `text/plain` with the bare IP instead.** |
-| `GET /ip/` | `text/plain`, bare client IP, nothing else. |
-| `GET /json/` | `application/json`: `{clientIp, headers, connection}`. |
+| `GET /` , `/ip` , `/ip/` , `/json` , `/json/` | See below. Trailing-slash variants of `/ip` and `/json` both resolve. |
+| `GET /` | HTML page: client IP, full request headers, connection details. **If `User-Agent` starts with `curl` or `wget` (first 4 chars, case-insensitive), returns `text/plain` with the bare IP instead.** |
+| `GET /ip` | `text/plain`, bare client IP, nothing else. |
+| `GET /json` | `application/json`: `{clientIp, headers, connection}`. |
 | `GET /static/*` | Static files. Currently just `blue.jpg`, linked from the page footer. |
-| `GET /test/:host` | ⚠️ Server-side fetch of an arbitrary URL — see the security section. |
-| anything else | `404` with the body `Sorry! Blue can't find that!` |
+| anything else | `404` with the body `Sorry! Blue can't find that!` (non-GET/HEAD → `405`, same body) |
 
-**The `connection` object** — this is the differentiator, not incidental:
-- `protocol` — `http` / `https`
-- `remotePort` — client source port
-- `remoteFamily` — `IPv4` / `IPv6`, derived by detecting the `::ffff:` v4-mapped prefix and stripping it (the IP is normalised the same way for display)
-- **https only:** `tlsProtocol`, `cipherName`, `cipherStandardName` — read off the live socket
+**The `connection` object is the differentiator, not incidental** — and it differs by front door:
 
-**Also contractual:** no-store cache headers on every response · one access-log line per request to stdout, `<ISO8601> - <ip> <proto> <host> <url> "<user-agent>"` (**including** `/static` hits — the static handler is mounted *after* the logger deliberately) · `v4.` resolves A only, `v6.` AAAA only, apex both.
+- **Native** (`myip.blue`, `v4.`, `v6.` — direct, TLS terminated here): `protocol` · `remotePort` (client source port) · `remoteFamily` (`IPv4`/`IPv6`, from the `::ffff:` v4-mapped prefix, which is also stripped for display) · and on https, `tlsProtocol` / `cipherName` / `cipherStandardName` **read off the live socket**.
+- **Edge** (`cf.myip.blue` — arrives via the tunnel on loopback): `via: "cloudflare"` · `remoteFamily` · plus whatever Cloudflare supplies — `country`, `colo`, `ray`, `tlsVersion`, `tlsCipher`. Absent headers are **omitted rather than reported empty**, so what you see is what the edge actually sent.
+
+**Also contractual:** no-store cache headers on every response · one access-log line per request to stdout, `<ISO8601> - <ip> <proto> <host> <url> "<ua>" <status> <ms>` — **including `/static` hits**, so keep static going through the same handler · `v4.` resolves A only, `v6.` AAAA only, apex both.
 
 ---
 
