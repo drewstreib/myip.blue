@@ -68,6 +68,8 @@ User-Agent starts with Mozilla/                -> HTML
 otherwise                                      -> JSON
 ```
 
+⚠️ **Verified against real browser headers (2026-08-02):** Chrome, Firefox, Safari, Edge, IE11, IE8, Mobile Safari and Lynx all get HTML; curl, wget, python-requests, Go, undici and **PowerShell** all get JSON. **IE8 is the reason the `Mozilla/` fallback exists** — its `Accept` contains no `text/html` at all. **PowerShell's `Invoke-WebRequest` is why that fallback is qualified** by `NOT_REALLY_A_BROWSER`: it impersonates Mozilla but wants data. Keep that deny-list SMALL; it patches a heuristic, it is not the mechanism.
+
 ⚠️ **The browser test is the ACCEPT HEADER, not the user-agent.** Every real browser sends `text/html`; curl, wget, python-requests, Go and undici send `*/*` or nothing. UA `Mozilla/` is a second opinion only — so there is **no list of client names to maintain**, which is the whole point. Don't "improve" this into UA sniffing.
 
 **`timestamp`** (ISO 8601 UTC) is generated **per request** and sits **directly under `clientIp`**; **`docs`** is last. Both positions are asserted by tests. The timestamp exists so a caller — an LLM agent especially — can tell a live answer from a cached or pasted one; `docs` makes the response self-describing. ⚠️ **The HTML page carries neither**; a test asserts the timestamp does not appear there.

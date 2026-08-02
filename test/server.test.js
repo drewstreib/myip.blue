@@ -248,3 +248,70 @@ test("non-GET methods are rejected", async () => {
   const res = await get("/", { method: "POST" });
   assert.equal(res.status, 405);
 });
+
+test("every response's Content-Type matches its body", async () => {
+  const cases = [
+    ["/", {}, /application\/json; charset=utf-8/],
+    ["/", { accept: "text/plain" }, /text\/plain; charset=utf-8/],
+    ["/", { accept: "text/html" }, /text\/html; charset=utf-8/],
+    ["/ip", {}, /text\/plain; charset=utf-8/],
+    ["/json", {}, /application\/json; charset=utf-8/],
+    ["/html", {}, /text\/html; charset=utf-8/],
+    ["/docs", {}, /text\/plain; charset=utf-8/],
+    ["/llms.txt", {}, /text\/plain; charset=utf-8/],
+    ["/static/blue.jpg", {}, /^image\/jpeg$/],
+    ["/nope", {}, /text\/plain; charset=utf-8/],
+  ];
+  for (const [path, headers, want] of cases) {
+    const res = await get(path, { headers });
+    assert.match(res.headers.get("content-type"), want, `${path} ${JSON.stringify(headers)}`);
+  }
+
+  // Binary must NOT claim a charset.
+  const jpg = await get("/static/blue.jpg");
+  assert.ok(!/charset/i.test(jpg.headers.get("content-type")), "binary must not declare a charset");
+
+  // And the bodies must actually BE what the header claims.
+  JSON.parse(await (await get("/json")).text());
+  assert.match(await (await get("/html")).text(), /^<!DOCTYPE html>/);
+  assert.match((await (await get("/ip")).text()).trim(), /^[0-9a-f.:]+$/i);
+});
+
+test("405 also declares text/plain", async () => {
+  const res = await get("/", { method: "POST" });
+  assert.equal(res.status, 405);
+  assert.match(res.headers.get("content-type"), /text\/plain; charset=utf-8/);
+});
+
+test("real browsers all get HTML — including IE8, whose Accept lacks text/html", async () => {
+  const browsers = [
+    ["Chrome", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"],
+    ["Firefox", "Mozilla/5.0 (Windows NT 10.0; rv:121.0) Gecko/20100101 Firefox/121.0", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,*/*;q=0.8"],
+    ["Safari", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"],
+    ["Edge", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0", "text/html,application/xhtml+xml,*/*;q=0.8"],
+    ["IE11", "Mozilla/5.0 (Windows NT 10.0; Trident/7.0; rv:11.0) like Gecko", "text/html, application/xhtml+xml, image/jxr, */*"],
+    // IE8 sends NO text/html at all — only the Mozilla/ fallback saves it.
+    ["IE8", "Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.1; Trident/4.0)", "image/gif, image/jpeg, image/pjpeg, */*"],
+    ["MobileSafari", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1", "text/html,application/xhtml+xml,*/*;q=0.8"],
+  ];
+  for (const [name, ua, accept] of browsers) {
+    const res = await get("/", { headers: { "user-agent": ua, accept } });
+    assert.match(res.headers.get("content-type"), /text\/html/, `${name} must get HTML`);
+  }
+});
+
+test("scripting clients get JSON, including ones that impersonate Mozilla", async () => {
+  const machines = [
+    ["curl", "curl/8.7.1"],
+    ["wget", "Wget/1.21.4"],
+    ["python-requests", "python-requests/2.32.3"],
+    ["Go", "Go-http-client/2.0"],
+    ["undici", "undici"],
+    // Invoke-WebRequest claims to be Mozilla; it still wants data.
+    ["PowerShell", "Mozilla/5.0 (Windows NT; Windows NT 10.0; en-US) WindowsPowerShell/5.1"],
+  ];
+  for (const [name, ua] of machines) {
+    const res = await get("/", { headers: { "user-agent": ua, accept: "*/*" } });
+    assert.match(res.headers.get("content-type"), /application\/json/, `${name} must get JSON`);
+  }
+});

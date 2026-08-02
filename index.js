@@ -31,6 +31,10 @@ const TLS_KEY = process.env.TLS_KEY ?? "/key.pem";
 const TLS_CERT = process.env.TLS_CERT ?? "/chain.pem";
 const STATIC_DIR = path.resolve(process.env.STATIC_DIR ?? path.join(HERE, "static"));
 
+// Clients that claim to be Mozilla but are scripting tools. See preferredForm().
+const NOT_REALLY_A_BROWSER =
+  /PowerShell|curl|wget|python|java|okhttp|Go-http|libwww|httpie|postman|insomnia|axios|node-fetch/i;
+
 const CONTENT_TYPES = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
@@ -139,7 +143,16 @@ function preferredForm(req) {
   if (!asksHtml && /text\/plain/i.test(accept)) return "text";
 
   if (asksHtml) return "html";
-  if (/^Mozilla\//i.test(ua)) return "html";
+
+  // UA fallback, needed for exactly one real case: older IE sends an Accept
+  // header with NO text/html in it (IE8: "image/gif, image/jpeg, ..., */*").
+  // ⚠️ But some scripting clients deliberately impersonate a browser — notably
+  // PowerShell's Invoke-WebRequest, whose UA is
+  // "Mozilla/5.0 (Windows NT; ...) WindowsPowerShell/5.1". Those want data, not
+  // a page, so the Mozilla/ check is qualified by a short deny list. Keep this
+  // list SMALL: it is a patch on a heuristic, not the mechanism. Accept is.
+  if (/^Mozilla\//i.test(ua) && !NOT_REALLY_A_BROWSER.test(ua)) return "html";
+
   return "json";
 }
 
