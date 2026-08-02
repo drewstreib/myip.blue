@@ -1,5 +1,0 @@
-{
-    "name": "dssh devcontainer",
-    "image": "node:16",
-    "postCreateCommand": "npm install"
-}
