@@ -342,15 +342,15 @@ test("/robots.txt is permissive and points at the machine-readable docs", async 
   assert.ok(!/Disallow: \/\s*$/m.test(body), "must not disallow everything");
 });
 
-test("fixed routes forgive case; /static does NOT", async () => {
-  for (const p of ["/JSON", "/Json", "/IP", "/Docs", "/LLMS.TXT", "/HTML", "/Robots.txt"]) {
-    assert.equal((await get(p)).status, 200, `${p} should resolve`);
+test("paths are case-sensitive — no lenient aliases", async () => {
+  // Deliberate (Drew, 2026-08-02): case-insensitive matching was implemented and
+  // then reverted, because an undocumented leniency becomes a contract as soon
+  // as something depends on it, and then it cannot be removed.
+  for (const p of ["/JSON", "/Json", "/IP", "/Docs", "/LLMS.TXT", "/HTML", "/Robots.txt", "/STATIC/blue.jpg"]) {
+    assert.equal((await get(p)).status, 404, `${p} must NOT resolve`);
   }
-  // The case-folding must not reach /static — assert on the PREFIX, which is
-  // ours, not on the filename, which is the filesystem's.
-  // ⚠️ Do NOT assert /static/BLUE.JPG 404s: macOS (APFS) is case-INSENSITIVE by
-  // default and would serve it, while the Linux host would not. That assertion
-  // tests the OS, not this code, and fails only on a developer Mac.
-  assert.equal((await get("/STATIC/blue.jpg")).status, 404, "the /static prefix must stay case-sensitive");
-  assert.equal((await get("/static/blue.jpg")).status, 200);
+  // The correctly-cased forms still work.
+  for (const p of ["/json", "/ip", "/docs", "/llms.txt", "/html", "/robots.txt", "/static/blue.jpg"]) {
+    assert.equal((await get(p)).status, 200, p);
+  }
 });

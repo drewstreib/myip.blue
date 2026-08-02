@@ -239,14 +239,8 @@ async function route(req, res, isTls) {
       2,
     ) + "\n";
 
-  // Fixed routes match case-insensitively — /JSON and /Docs work. Undocumented
-  // on purpose: it forgives a typo, it is not a second spelling to advertise.
-  // ⚠️ NOT applied to /static/, which resolves against a case-sensitive
-  // filesystem; loosening it there buys nothing and invites path confusion.
-  const p = urlPath.toLowerCase();
-
   let status;
-  if (p === "/" || p === "") {
+  if (urlPath === "/" || urlPath === "") {
     const form = preferredForm(req);
     if (form === "html") {
       send(res, 200, "text/html; charset=utf-8", renderPage(payload));
@@ -256,23 +250,23 @@ async function route(req, res, isTls) {
       send(res, 200, "application/json; charset=utf-8", jsonBody());
     }
     status = 200;
-  } else if (p === "/ip" || p === "/ip/") {
+  } else if (urlPath === "/ip" || urlPath === "/ip/") {
     send(res, 200, "text/plain; charset=utf-8", clientIp + "\n");
     status = 200;
-  } else if (p === "/json" || p === "/json/") {
+  } else if (urlPath === "/json" || urlPath === "/json/") {
     send(res, 200, "application/json; charset=utf-8", jsonBody());
     status = 200;
-  } else if (p === "/html" || p === "/html/") {
+  } else if (urlPath === "/html" || urlPath === "/html/") {
     // Forces the page regardless of what the client asked for. Completes the
     // set: /ip, /json and /html each pin one form, and `/` negotiates.
     send(res, 200, "text/html; charset=utf-8", renderPage(payload));
     status = 200;
-  } else if (p === "/docs" || p === "/docs/" || p === "/llms.txt") {
+  } else if (urlPath === "/docs" || urlPath === "/docs/" || urlPath === "/llms.txt") {
     // Markdown served as text/plain on purpose: it renders readably raw, and a
     // machine gets the whole contract in one cheap request with no HTML to strip.
     send(res, 200, "text/plain; charset=utf-8", DOCS);
     status = 200;
-  } else if (p === "/robots.txt") {
+  } else if (urlPath === "/robots.txt") {
     send(res, 200, "text/plain; charset=utf-8", ROBOTS);
     status = 200;
   } else if (urlPath.startsWith("/static/")) {

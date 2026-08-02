@@ -61,9 +61,9 @@ Trailing slashes resolve on `/ip`, `/json`, `/html`, `/docs`. **`OPTIONS` → `2
 
 **CORS is open (`Access-Control-Allow-Origin: *`) on every response, including errors.** Safe here — every byte describes the caller and is already known to them, and no credentials are involved. Without it the same-origin policy blocks all browser-based callers, which was a whole class of user shut out.
 
-🤫 **Fixed routes match case-insensitively (`/JSON`, `/Docs` work) and this is DELIBERATELY UNDOCUMENTED** (Drew, 2026-08-02: *"goal is to be helpful, not to force correctness… but undocumented"*). It forgives a typo; it is not a second spelling to advertise. ⚠️ **It does NOT extend to `/static/`** — that resolves against a case-sensitive filesystem and loosening it there buys nothing.
+**Paths are CASE-SENSITIVE and there are no lenient aliases.** Case-insensitive matching was built and then reverted the same day (Drew, 2026-08-02: *"i don't want /JSON. might make people rely on a wrong behavior… let's just make it work correctly"*). The reasoning generalises: **an undocumented leniency becomes a contract the moment something depends on it**, and then it cannot be removed. A test asserts `/JSON` and friends 404.
 
-⚠️ **Never assert `/static/BLUE.JPG` 404s in a test.** macOS (APFS) is case-**in**sensitive by default and serves it; the Linux host does not. That asserts the OS, not this code, and fails only on a developer Mac. Assert the `/STATIC/` **prefix** instead — that part is ours.
+⚠️ **Never assert `/static/BLUE.JPG` 404s in a test.** macOS (APFS) is case-**in**sensitive by default and serves it; the Linux host does not. That asserts the OS, not this code, and fails only on a developer Mac — assert on a path prefix, which is ours.
 
 🛑 **`/` DEFAULTS TO JSON since 2026-08-02 — this deliberately broke `curl myip.blue` → bare IP** (Drew: *"i'm ok breaking the contract… i'd rather go the long term best way and break now than later"*). `/ip` is the stable plain-text endpoint. Order of the rule, in `preferredForm()`:
 
