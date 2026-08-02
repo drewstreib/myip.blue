@@ -1,0 +1,11 @@
+node_modules/
+npm-debug.log*
+
+# package-lock.json is deliberately NOT committed yet — it is a real decision,
+# not an oversight. The Dockerfile does `COPY package*.json ./`, and that glob
+# MATCHES a lockfile: committing one changes what `npm install` resolves inside
+# the image. Every dependency in package.json is currently pinned to "*", so
+# adding a lock would be the first time the container build became reproducible
+# — a genuine improvement, but a behavioural change to a live build. Decide it
+# on purpose, then delete this block.
+package-lock.json
