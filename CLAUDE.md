@@ -81,6 +81,8 @@ otherwise                                      -> JSON
 
 **`timestamp`** (ISO 8601 UTC) is generated **per request** and sits **directly under `clientIp`**; **`docs`** is last. Both positions are asserted by tests. The timestamp exists so a caller — an LLM agent especially — can tell a live answer from a cached or pasted one; `docs` makes the response self-describing. ⚠️ **The HTML page carries neither**; a test asserts the timestamp does not appear there.
 
+⚠️ **Doc prose must be SURFACE-NEUTRAL.** The same sentences appear in the HTML page and in `/docs` / `/llms.txt`, which are plain text — so no "this page", "below", "above" or "click". Say **"gets HTML"**, never "gets this HTML page" (Drew, 2026-08-02). A phrase that only parses on one surface is wrong on the other.
+
 ⚠️ **`lib/docs.js` and the page's Usage list are the same contract stated twice.** Change a route and you change both, or they drift. Tests check the docs mention every live endpoint and never mention the removed `/test/`.
 
 **The `connection` object is the differentiator, not incidental** — and it differs by front door:
