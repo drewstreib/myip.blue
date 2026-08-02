@@ -48,14 +48,31 @@ Doc conventions in full → **`/d:docs`**, which also runs the end-of-session pa
 
 | Route | Behaviour |
 |---|---|
-| `GET /` , `/ip` , `/ip/` , `/json` , `/json/` | See below. Trailing-slash variants of `/ip` and `/json` both resolve. |
-| `GET /` | HTML page: client IP, full request headers, connection details. **If `User-Agent` starts with `curl` or `wget` (first 4 chars, case-insensitive), returns `text/plain` with the bare IP instead.** |
+| `GET /` | **JSON by default.** HTML only if the client looks like a browser — see the negotiation rule below. |
 | `GET /ip` | `text/plain`, bare client IP, nothing else. |
-| `GET /json` | `application/json`: `{clientIp, timestamp, headers, connection}`. |
+| `GET /json` | `application/json`: `{clientIp, timestamp, headers, connection, docs}`. |
+| `GET /html` | The HTML page, forced, whatever the client asked for. |
+| `GET /docs` , `/llms.txt` | The docs as markdown served `text/plain`. Byte-identical at both paths. |
 | `GET /static/*` | Static files. Currently just `blue.jpg`, linked from the page footer. |
 | anything else | `404` with the body `Sorry! Blue can't find that!` (non-GET/HEAD → `405`, same body) |
 
-**`timestamp`** (ISO 8601 UTC, JSON only) is generated **per request** and sits **directly under `clientIp`** — that position is part of the contract. It exists so a caller, an LLM agent especially, can tell a live answer from a cached or pasted one. ⚠️ **Deliberately absent from the HTML page**; a test asserts it does not appear there.
+Trailing slashes resolve on `/ip`, `/json`, `/html`, `/docs`.
+
+🛑 **`/` DEFAULTS TO JSON since 2026-08-02 — this deliberately broke `curl myip.blue` → bare IP** (Drew: *"i'm ok breaking the contract… i'd rather go the long term best way and break now than later"*). `/ip` is the stable plain-text endpoint. Order of the rule, in `preferredForm()`:
+
+```
+Accept: application/json  (without text/html)  -> JSON
+Accept: text/plain        (without text/html)  -> bare IP
+Accept contains text/html                      -> HTML
+User-Agent starts with Mozilla/                -> HTML
+otherwise                                      -> JSON
+```
+
+⚠️ **The browser test is the ACCEPT HEADER, not the user-agent.** Every real browser sends `text/html`; curl, wget, python-requests, Go and undici send `*/*` or nothing. UA `Mozilla/` is a second opinion only — so there is **no list of client names to maintain**, which is the whole point. Don't "improve" this into UA sniffing.
+
+**`timestamp`** (ISO 8601 UTC) is generated **per request** and sits **directly under `clientIp`**; **`docs`** is last. Both positions are asserted by tests. The timestamp exists so a caller — an LLM agent especially — can tell a live answer from a cached or pasted one; `docs` makes the response self-describing. ⚠️ **The HTML page carries neither**; a test asserts the timestamp does not appear there.
+
+⚠️ **`lib/docs.js` and the page's Usage list are the same contract stated twice.** Change a route and you change both, or they drift. Tests check the docs mention every live endpoint and never mention the removed `/test/`.
 
 **The `connection` object is the differentiator, not incidental** — and it differs by front door:
 

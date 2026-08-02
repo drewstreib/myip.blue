@@ -55,18 +55,79 @@ test("/ip and /ip/ both resolve", async () => {
   assert.equal((await get("/ip/")).status, 200);
 });
 
-test("curl and wget user-agents get plain text at /", async () => {
-  for (const ua of ["curl/8.7.1", "Wget/1.21"]) {
-    const res = await get("/", { headers: { "user-agent": ua } });
-    assert.match(res.headers.get("content-type"), /text\/plain/, ua);
-    assert.equal((await res.text()).trim(), "127.0.0.1", ua);
+test("/ defaults to JSON for machines (curl, wget, libraries)", async () => {
+  // Changed 2026-08-02: this used to return a bare IP. /ip is now the only
+  // bare-string endpoint.
+  for (const ua of ["curl/8.7.1", "Wget/1.21", "python-requests/2.32", "Go-http-client/2.0"]) {
+    const res = await get("/", { headers: { "user-agent": ua, accept: "*/*" } });
+    assert.match(res.headers.get("content-type"), /application\/json/, ua);
+    const body = await res.json();
+    assert.equal(body.clientIp, "127.0.0.1", ua);
   }
 });
 
-test("a browser user-agent gets HTML at /", async () => {
-  const res = await get("/", { headers: { "user-agent": "Mozilla/5.0 Chrome/120" } });
+test("/ returns HTML when the client asks for text/html", async () => {
+  const res = await get("/", { headers: { accept: "text/html,application/xhtml+xml,*/*;q=0.8" } });
   assert.match(res.headers.get("content-type"), /text\/html/);
   assert.match(await res.text(), /Your public IP address/);
+});
+
+test("/ returns HTML for a Mozilla user-agent even without an Accept header", async () => {
+  const res = await get("/", { headers: { "user-agent": "Mozilla/5.0 Chrome/120", accept: "*/*" } });
+  assert.match(res.headers.get("content-type"), /text\/html/);
+});
+
+test("Accept: application/json beats a browser user-agent", async () => {
+  const res = await get("/", {
+    headers: { "user-agent": "Mozilla/5.0 Chrome/120", accept: "application/json" },
+  });
+  assert.match(res.headers.get("content-type"), /application\/json/);
+});
+
+test("Accept: text/plain gets the bare IP (the scripting escape hatch)", async () => {
+  const res = await get("/", { headers: { accept: "text/plain", "user-agent": "curl/8.7.1" } });
+  assert.match(res.headers.get("content-type"), /text\/plain/);
+  assert.equal((await res.text()).trim(), "127.0.0.1");
+});
+
+test("a real browser Accept header still wins over text/plain in the same list", async () => {
+  // Browsers send text/html AND other types; html must win.
+  const res = await get("/", {
+    headers: { accept: "text/html,text/plain;q=0.9,*/*;q=0.8" },
+  });
+  assert.match(res.headers.get("content-type"), /text\/html/);
+});
+
+test("/html forces the page even for a machine client", async () => {
+  for (const p of ["/html", "/html/"]) {
+    const res = await get(p, { headers: { "user-agent": "curl/8.7.1", accept: "application/json" } });
+    assert.equal(res.status, 200, p);
+    assert.match(res.headers.get("content-type"), /text\/html/, p);
+    assert.match(await res.text(), /Your public IP address/, p);
+  }
+});
+
+test("/docs and /llms.txt serve the same plain-text document", async () => {
+  const docs = await get("/docs");
+  assert.equal(docs.status, 200);
+  assert.match(docs.headers.get("content-type"), /text\/plain/);
+  const a = await docs.text();
+  assert.match(a, /^# myip\.blue/);
+
+  for (const p of ["/docs/", "/llms.txt"]) {
+    const r = await get(p);
+    assert.equal(r.status, 200, p);
+    assert.equal(await r.text(), a, `${p} must match /docs byte-for-byte`);
+  }
+});
+
+test("the docs describe the endpoints that actually exist", async () => {
+  const docs = await (await get("/docs")).text();
+  for (const ep of ["/ip", "/json", "/html", "/docs", "/llms.txt", "/static/"]) {
+    assert.ok(docs.includes(ep), `docs should mention ${ep}`);
+  }
+  // The removed endpoint must not reappear in the docs.
+  assert.ok(!docs.includes("/test/"), "docs must not advertise the removed SSRF endpoint");
 });
 
 test("/json reports the connection", async () => {
@@ -90,8 +151,9 @@ test("/json carries a live ISO timestamp, directly under clientIp", async () => 
   // into the image or cached upstream.
   assert.ok(t >= before - 5000 && t <= Date.now() + 5000, "timestamp must be current");
 
-  // Key ORDER matters: it is specified to sit directly below clientIp.
-  assert.deepEqual(Object.keys(body).slice(0, 2), ["clientIp", "timestamp"]);
+  // Key ORDER matters: timestamp directly below clientIp, docs last.
+  assert.deepEqual(Object.keys(body), ["clientIp", "timestamp", "headers", "connection", "docs"]);
+  assert.equal(body.docs, "https://myip.blue/docs");
 
   // Two calls must not return the same instant-for-free (i.e. not a constant).
   await new Promise((r) => setTimeout(r, 5));

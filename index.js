@@ -21,6 +21,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderPage } from "./lib/page.js";
+import { DOCS, DOCS_URL } from "./lib/docs.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -29,10 +30,6 @@ const HTTPS_PORT = Number(process.env.HTTPS_PORT ?? 443);
 const TLS_KEY = process.env.TLS_KEY ?? "/key.pem";
 const TLS_CERT = process.env.TLS_CERT ?? "/chain.pem";
 const STATIC_DIR = path.resolve(process.env.STATIC_DIR ?? path.join(HERE, "static"));
-
-// Agents whose default at / is a bare IP rather than the HTML page. Matched on
-// the first 4 characters, preserving the original behaviour exactly.
-const PLAIN_AGENTS = ["curl", "wget"];
 
 const CONTENT_TYPES = {
   ".jpg": "image/jpeg",
@@ -121,9 +118,29 @@ function send(res, status, type, body, extraHeaders = {}) {
   res.end(body);
 }
 
-function wantsPlain(req) {
-  const ua = req.headers["user-agent"];
-  return typeof ua === "string" && PLAIN_AGENTS.includes(ua.slice(0, 4).toLowerCase());
+// What form should `/` take for this client?
+//
+// 🛑 THE DEFAULT IS JSON (changed 2026-08-02, deliberately breaking the old
+// `curl myip.blue` -> bare IP behaviour). This is a diagnostic tool: machines
+// are the common caller, so they get structured data unless something asks for
+// a page. `/ip` is still the bare-string endpoint.
+//
+// The browser test is the ACCEPT HEADER, not the user-agent. Every real browser
+// sends `text/html`; curl, wget, python-requests, Go and undici send `*/*` or
+// nothing. UA `Mozilla/` is a cheap second opinion, not the primary signal —
+// which is why there is no list of client names to maintain here.
+function preferredForm(req) {
+  const accept = req.headers.accept ?? "";
+  const ua = req.headers["user-agent"] ?? "";
+  const asksHtml = /text\/html/i.test(accept);
+
+  // An explicit machine ask wins outright.
+  if (!asksHtml && /application\/json/i.test(accept)) return "json";
+  if (!asksHtml && /text\/plain/i.test(accept)) return "text";
+
+  if (asksHtml) return "html";
+  if (/^Mozilla\//i.test(ua)) return "html";
+  return "json";
 }
 
 async function serveStatic(req, res, urlPath) {
@@ -176,29 +193,48 @@ async function route(req, res, isTls) {
     return { status: 405, clientIp, connection };
   }
 
+  // One JSON body, used by both `/` and `/json`. `timestamp` sits directly under
+  // clientIp so a caller — an LLM agent especially — can tell a live answer from
+  // a cached or pasted one; `docs` makes the response self-describing.
+  const jsonBody = () =>
+    JSON.stringify(
+      {
+        clientIp,
+        timestamp: new Date().toISOString(),
+        headers: req.headers,
+        connection,
+        docs: DOCS_URL,
+      },
+      null,
+      2,
+    ) + "\n";
+
   let status;
   if (urlPath === "/" || urlPath === "") {
-    if (wantsPlain(req)) {
+    const form = preferredForm(req);
+    if (form === "html") {
+      send(res, 200, "text/html; charset=utf-8", renderPage(payload));
+    } else if (form === "text") {
       send(res, 200, "text/plain; charset=utf-8", clientIp + "\n");
     } else {
-      send(res, 200, "text/html; charset=utf-8", renderPage(payload));
+      send(res, 200, "application/json; charset=utf-8", jsonBody());
     }
     status = 200;
   } else if (urlPath === "/ip" || urlPath === "/ip/") {
     send(res, 200, "text/plain; charset=utf-8", clientIp + "\n");
     status = 200;
   } else if (urlPath === "/json" || urlPath === "/json/") {
-    // `timestamp` is generated per-request and sits directly under clientIp so a
-    // caller — an LLM agent especially — can tell a live answer from a cached or
-    // pasted one at a glance. Deliberately JSON-only: the HTML page does not
-    // carry it.
-    const json = {
-      clientIp,
-      timestamp: new Date().toISOString(),
-      headers: req.headers,
-      connection,
-    };
-    send(res, 200, "application/json; charset=utf-8", JSON.stringify(json, null, 2) + "\n");
+    send(res, 200, "application/json; charset=utf-8", jsonBody());
+    status = 200;
+  } else if (urlPath === "/html" || urlPath === "/html/") {
+    // Forces the page regardless of what the client asked for. Completes the
+    // set: /ip, /json and /html each pin one form, and `/` negotiates.
+    send(res, 200, "text/html; charset=utf-8", renderPage(payload));
+    status = 200;
+  } else if (urlPath === "/docs" || urlPath === "/docs/" || urlPath === "/llms.txt") {
+    // Markdown served as text/plain on purpose: it renders readably raw, and a
+    // machine gets the whole contract in one cheap request with no HTML to strip.
+    send(res, 200, "text/plain; charset=utf-8", DOCS);
     status = 200;
   } else if (urlPath.startsWith("/static/")) {
     status = await serveStatic(req, res, urlPath);
