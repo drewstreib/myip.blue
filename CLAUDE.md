@@ -51,9 +51,11 @@ Doc conventions in full → **`/d:docs`**, which also runs the end-of-session pa
 | `GET /` , `/ip` , `/ip/` , `/json` , `/json/` | See below. Trailing-slash variants of `/ip` and `/json` both resolve. |
 | `GET /` | HTML page: client IP, full request headers, connection details. **If `User-Agent` starts with `curl` or `wget` (first 4 chars, case-insensitive), returns `text/plain` with the bare IP instead.** |
 | `GET /ip` | `text/plain`, bare client IP, nothing else. |
-| `GET /json` | `application/json`: `{clientIp, headers, connection}`. |
+| `GET /json` | `application/json`: `{clientIp, timestamp, headers, connection}`. |
 | `GET /static/*` | Static files. Currently just `blue.jpg`, linked from the page footer. |
 | anything else | `404` with the body `Sorry! Blue can't find that!` (non-GET/HEAD → `405`, same body) |
+
+**`timestamp`** (ISO 8601 UTC, JSON only) is generated **per request** and sits **directly under `clientIp`** — that position is part of the contract. It exists so a caller, an LLM agent especially, can tell a live answer from a cached or pasted one. ⚠️ **Deliberately absent from the HTML page**; a test asserts it does not appear there.
 
 **The `connection` object is the differentiator, not incidental** — and it differs by front door:
 

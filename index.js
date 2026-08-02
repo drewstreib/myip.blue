@@ -188,7 +188,17 @@ async function route(req, res, isTls) {
     send(res, 200, "text/plain; charset=utf-8", clientIp + "\n");
     status = 200;
   } else if (urlPath === "/json" || urlPath === "/json/") {
-    send(res, 200, "application/json; charset=utf-8", JSON.stringify(payload, null, 2) + "\n");
+    // `timestamp` is generated per-request and sits directly under clientIp so a
+    // caller — an LLM agent especially — can tell a live answer from a cached or
+    // pasted one at a glance. Deliberately JSON-only: the HTML page does not
+    // carry it.
+    const json = {
+      clientIp,
+      timestamp: new Date().toISOString(),
+      headers: req.headers,
+      connection,
+    };
+    send(res, 200, "application/json; charset=utf-8", JSON.stringify(json, null, 2) + "\n");
     status = 200;
   } else if (urlPath.startsWith("/static/")) {
     status = await serveStatic(req, res, urlPath);

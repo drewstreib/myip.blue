@@ -77,6 +77,50 @@ test("/json reports the connection", async () => {
   assert.equal(typeof body.connection.remotePort, "number");
 });
 
+test("/json carries a live ISO timestamp, directly under clientIp", async () => {
+  const before = Date.now();
+  const res = await get("/json");
+  const text = await res.text();
+  const body = JSON.parse(text);
+
+  assert.ok(body.timestamp, "timestamp must be present");
+  const t = Date.parse(body.timestamp);
+  assert.ok(!Number.isNaN(t), `timestamp must parse as a date: ${body.timestamp}`);
+  // It is the point of the field that this is generated per request, not baked
+  // into the image or cached upstream.
+  assert.ok(t >= before - 5000 && t <= Date.now() + 5000, "timestamp must be current");
+
+  // Key ORDER matters: it is specified to sit directly below clientIp.
+  assert.deepEqual(Object.keys(body).slice(0, 2), ["clientIp", "timestamp"]);
+
+  // Two calls must not return the same instant-for-free (i.e. not a constant).
+  await new Promise((r) => setTimeout(r, 5));
+  const second = await (await get("/json")).json();
+  assert.notEqual(second.timestamp, body.timestamp, "timestamp must change between requests");
+});
+
+test("the HTML page does NOT carry the timestamp (json-only by design)", async () => {
+  const res = await get("/", { headers: { "user-agent": "Mozilla/5.0 Chrome/120" } });
+  assert.doesNotMatch(await res.text(), /timestamp/i);
+});
+
+test("usage links are real anchors and keep the code styling", async () => {
+  const body = await (await get("/", { headers: { "user-agent": "Mozilla/5.0 Chrome/120" } })).text();
+  for (const href of [
+    "https://myip.blue/",
+    "https://v4.myip.blue/",
+    "https://v6.myip.blue/",
+    "https://myip.blue/json",
+    "https://myip.blue/ip",
+    "https://cf.myip.blue/",
+  ]) {
+    assert.ok(body.includes(`href="${href}"`), `missing link: ${href}`);
+  }
+  // The anchors must sit INSIDE span.code, or they lose the monospace styling.
+  assert.match(body, /<span class="code"><a href="https:\/\/myip\.blue\/">myip\.blue<\/a><\/span>/);
+  assert.match(body, /\.code a \{[^}]*text-decoration: none/);
+});
+
 test("unknown paths return the 404 string", async () => {
   const res = await get("/nope");
   assert.equal(res.status, 404);
