@@ -61,16 +61,20 @@ The revamp must preserve **all** of this. Verified by reading the source 2026-08
 - `remoteFamily` — `IPv4` / `IPv6`, derived by detecting the `::ffff:` v4-mapped prefix and stripping it (the IP is normalised the same way for display)
 - **https only:** `tlsProtocol`, `cipherName`, `cipherStandardName` — read off the live socket
 
-**Also contractual:** `nocache` headers on every response · one access-log line per request to stdout, `<ISO8601> - <ip> <proto> <host> <url> "<user-agent>"` (**including** `/static` hits — the static handler is mounted *after* the logger deliberately) · `v4.` resolves A only, `v6.` AAAA only, apex both.
+**Also contractual:** no-store cache headers on every response · one access-log line per request to stdout, `<ISO8601> - <ip> <proto> <host> <url> "<user-agent>"` (**including** `/static` hits — the static handler is mounted *after* the logger deliberately) · `v4.` resolves A only, `v6.` AAAA only, apex both.
 
 ---
 
-## 🔴 Security — the known issue
+## 🔴 Security — the invariants
 
-**`GET /test/:host` takes a user-supplied URL and fetches it server-side, returning status, final URL, resolved IP and timing.** That is a textbook **SSRF** primitive: unauthenticated, public, and it will happily be pointed at internal addresses and cloud metadata endpoints. Its only real mitigation today is a host-level setting recorded in the control repo.
+Four things hold the line. Each has a test that **fails when only that protection is broken** (verified by deliberately breaking each one, 2026-08-02) — if you change any of them, run `npm test` and believe it.
 
-- **Do not quietly redesign or drop it — ask Drew what it is for first** (standing instruction). It looks like a deliberate connectivity-probe tool, not an accident.
-- Whatever replaces it needs, at minimum: a deny-list for private/link-local/metadata ranges **enforced after DNS resolution** (pre-resolution checks are trivially bypassed by a hostname that resolves inward), scheme restricted to http/https, redirects not followed, and rate limiting.
+1. **`escapeHtml` in `lib/page.js`.** Request headers are attacker-controlled and are echoed into the page. Dropping pug moved auto-escaping into our code; this is the only thing standing between a header and stored XSS.
+2. **The `/static` traversal guard** — resolve the path, *then* require containment under `STATIC_DIR`. String-matching `..` is not equivalent; percent-encoding defeats it.
+3. **CF-* headers are trusted ONLY from loopback.** That is what makes the edge view safe: a direct request forging `CF-Connecting-IP` arrives from a real remote address and is treated as native, so it cannot claim to be someone else.
+4. **Zero dependencies.** No supply chain, nothing to audit. Keep it that way — the bar for adding a runtime dep is very high. (The old tree listed **`fs`** and **`https`** as npm dependencies: real packages squatting Node core module names, pulled in for imports that always resolved to core.)
+
+✅ **`GET /test/:host` was REMOVED (Drew, 2026-08-02).** It was an unauthenticated server-side fetch — a textbook SSRF primitive reachable at internal addresses and cloud metadata endpoints — whose only mitigation was a *host-level* setting. **Do not reintroduce a fetch-on-behalf endpoint** without deny-listing private/link-local/metadata ranges **after DNS resolution**, restricting schemes, refusing redirects, and rate limiting.
 
 ---
 
@@ -78,13 +82,12 @@ The revamp must preserve **all** of this. Verified by reading the source 2026-08
 
 | Path | What it is |
 |---|---|
-| `index.js` | The whole service. |
-| `views/index.pug` | The HTML page — inline `<style>`, no build step, no framework. |
+| `index.js` | The whole service — routing, connection description, both listeners. |
+| `lib/page.js` | The entire view layer — one template literal. 🛑 `escapeHtml` is load-bearing (see above). |
+| `test/` | `node --test`, zero test deps. `npm test`. |
 | `static/` | `blue.jpg`. |
-| `Dockerfile` | Two stages: deps in `node:16`, runtime `node:16-alpine`. |
-| `.dockerignore` | Excludes `node_modules` — so a local install can't contaminate the image. |
-| `.github/workflows/` | Build + publish on push to `main` / `v*` tags. |
-| `*.sh` | `build.sh` (dev image), `prod-build.sh` (build + compose up), `run.sh` (local run, host cert paths), `prettier.sh`. All predate the revamp; expect them to be replaced. |
+| `Dockerfile` | Single stage on **distroless** (`nodejs22-debian12:nonroot`), 155MB. **Not alpine** — reasoning is in the file. |
+| `.github/workflows/` | Test, then build + publish a multi-arch image to **GHCR** on push to `main` / `v*`. |
 
 Canonical doc files, when this repo needs them: **`TODO.md`** (active work, `## P1` / `## P2`, `- [ ] (due YYYY-MM-DD) desc — context`) · **`TODO-EVENTUALLY.md`** (someday) · **`done/YYYY-MM-DD-task.md`** (one file per finished item; a decision *not* to do something is also a `done/` entry) · **`logs/YYYY-MM-DD-slug.md`** (session journal, grep fodder). **None exist yet** — create on first need, and remember Rule Zero applies to all of them.
 
@@ -92,13 +95,13 @@ Canonical doc files, when this repo needs them: **`TODO.md`** (active work, `## 
 
 ## Gotchas
 
-- 🛑 **`node index.js` does not run locally, and fails at *module load*.** `index.js` does `fs.readFileSync("/key.pem")` / `/chain.pem` at top level (absolute paths, filesystem root), so it throws `ENOENT` before Express is even constructed. **Verified 2026-08-02.** Ports are hardcoded `80`/`443` too, which need root on macOS — you never get that far. **Making the service locally runnable is a goal of the revamp**, not a nice-to-have: today there is no way to test a change short of building a container.
-- ⚠️ **Certs are read once at startup**, so a renewal does not take effect until the process restarts — and there is no reverse proxy in front, so **a restart is full downtime for the apex**. Drives the deploy/renewal design; detail in the control repo.
-- ⚠️ **Every dependency in `package.json` is pinned to `"*"`** and there is no committed lockfile — so two builds a minute apart can resolve differently. `.gitignore` explains why the lockfile isn't committed *yet*: `COPY package*.json ./` in the Dockerfile matches a lockfile, so adding one changes what the image resolves. Deliberate decision, not an oversight.
-- ⚠️ **`node:16` has been EOL since 2023-09.** Both stages. Replacing it is a headline goal of the revamp.
-- **`out` and `response` are assigned without `var`/`let`/`const`** in several handlers — implicit globals, shared across concurrent requests. Not currently exploitable because each is written before use in the same tick, but it is a real race waiting for an `await` in the wrong place. `/test/:host` already has the `await`.
-- **`express.static` is mounted after the logging middleware on purpose.** Reordering it silently stops static hits being logged.
-- **`/ip/` and `/json/` are written with trailing slashes.** Express default routing matches both with and without, so `/ip` works — don't "fix" the routes and assume nothing changed.
+- **Run it locally: `npm run dev`** (8080/8443) or `node index.js`. **TLS is optional** — if the cert files are unreadable it logs a warning and serves HTTP only. That is deliberate: the previous version read certs by absolute path at *module load* and died with `ENOENT` before the server existed, so it could never be run outside a container.
+- ⚠️ **Certs are still read once at startup**, so a renewal needs a restart — and with no reverse proxy in front, that restart is user-visible downtime. Unavoidable in-process; it is a deploy-shape problem, handled in the control repo.
+- ⚠️ **Routes must accept both `/ip` and `/ip/`.** Express matched both by default; this implementation matches them explicitly. Drop one and you silently break existing callers.
+- ⚠️ **Static is served through the same handler as everything else, on purpose**, so static hits appear in the access log. The original achieved this by mounting `express.static` *after* the logger — same intent, don't "tidy" it away.
+- **Binding 80/443 as non-root needs `NET_BIND_SERVICE`** from the runtime, or ports above 1024. The image no longer runs as root.
+- **`package-lock.json` is gitignored** and there is nothing to lock — dependencies are empty. If a dep is ever added, revisit that ignore: the Dockerfile's `COPY package*.json` glob matches a lockfile.
+- **Distroless has no shell**, so `docker exec sh` fails by design. To debug interactively, rebuild temporarily on `node:22-slim`.
 
 ---
 

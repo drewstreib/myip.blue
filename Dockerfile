@@ -1,5 +1,18 @@
 # Zero runtime dependencies, so there is no install stage and no node_modules.
-FROM node:22-alpine
+#
+# ⚠️ NOT alpine. Node classifies linux-musl as support tier "Experimental" —
+# "may not compile or test suite may not pass", and the core team does not
+# create releases for it (nodejs/node BUILDING.md). nodejs/docker-node
+# recommends the Debian variants for production.
+#
+# Distroless over node:22-slim, measured 2026-08-02: 155MB vs 247MB, both
+# glibc/Debian 12, and this one ships no shell and no package manager.
+# ⚠️ The trade: you cannot `docker exec sh` into it. Acceptable here — one
+# process, no deps, logs go off-box. To debug interactively, rebuild
+# temporarily on node:22-slim rather than adding a shell to this image.
+#
+# The base image's ENTRYPOINT is already `node`, so CMD is just the script.
+FROM gcr.io/distroless/nodejs22-debian12:nonroot
 
 WORKDIR /app
 
@@ -13,10 +26,6 @@ COPY static ./static
 # ⚠️ Runs as non-root. Binding 80/443 therefore needs NET_BIND_SERVICE granted
 # by the runtime (compose: cap_add), or HTTP_PORT/HTTPS_PORT set above 1024.
 # The old image ran as root purely to bind those ports.
-USER node
-
 EXPOSE 80 443
 
-# `node` directly, not `npm run start`. npm as PID 1 cost ~31MB RSS on a 405MB
-# box, swallowed signals, and made every stop exit 1 after ~2.1s instead of 143.
-CMD ["node", "index.js"]
+CMD ["index.js"]
