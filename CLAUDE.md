@@ -34,10 +34,10 @@ Doc conventions in full → **`/d:docs`**, which also runs the end-of-session pa
 
 ## 🚦 Guardrails
 
-- ✅ **Pushing `main` is safe — it publishes an image, it does NOT deploy** (Drew, 2026-08-02: *"you own the tree… you're not affecting prod myip.blue by changing it now"*). The origin runs a **locally-built image it never pulls**, so nothing reaches production until someone deliberately changes that. Commit and push freely.
-- 🛑 **Deploying IS the separate, gated step** — that's when the origin starts pulling this image. Drew's go, and the procedure is in the control repo.
-- 🛑 **The running production service is the rollback.** It runs from that locally-built image, predating all of this. Do not delete, retag or prune it — until a new deploy is proven, it is the only way back.
-- ⚠️ **Never edit the tree on the production host.** The host's copy had drifted from git for years (captured 2026-08-02, `163ed2f`). This checkout is the working tree; the host is a deploy target.
+- ✅ **Pushing `main` publishes an image; it does NOT deploy.** CI builds and pushes to GHCR, but the origin only takes it on an explicit `docker compose pull && up -d`. Commit and push freely.
+- 🛑 **Deploying is the separate, gated step** — Drew's go, procedure in the control repo.
+- 🛑 **Rollback is the pre-2026-08-02 image**, kept on the origin as a tag *and* as a tarball, because a plain `docker image prune -af` reaps unused tags. Details in the control repo; don't assume the tag alone survives.
+- ⚠️ **There is NO source tree on the origin any more** (deleted 2026-08-02). It is a pull target. The old on-host checkout had drifted from git for years — building there is *how* it drifted. **This checkout is the working tree.**
 - ⚠️ **Two front doors, one service.** `myip.blue` is served **direct from the origin** — that is deliberate and load-bearing, because reporting the client's *real* TLS cipher/protocol and source port only works on a direct connection. `cf.myip.blue` is the *through-Cloudflare* view on purpose. **Never put the apex behind a proxy** — it silently guts the app's whole point: every client would see Cloudflare's TLS and Cloudflare's address.
 
 ---
