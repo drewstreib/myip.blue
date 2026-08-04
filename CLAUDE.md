@@ -54,6 +54,7 @@ Doc conventions in full → **`/d:docs`**, which also runs the end-of-session pa
 | `GET /html` | The HTML page, forced, whatever the client asked for. |
 | `GET /docs` , `/llms.txt` | The docs as markdown served `text/plain`. Byte-identical at both paths. |
 | `GET /robots.txt` | Permissive (`Allow: /`), with a comment pointing crawlers at `/llms.txt`. |
+| `GET /.well-known/security.txt` | RFC 9116, compiled in (`SECURITY_TXT`). ⚠️ **`Expires` is a live obligation** — a test fails the build once it passes, and the same date is published by 33 other zones out-of-band, so renew both together. |
 | `GET /static/*` | Static files. Currently just `blue.jpg`, linked from the page footer. |
 | anything else | `404` with the body `Sorry! Blue can't find that!` (non-GET/HEAD → `405`, same body) |
 
