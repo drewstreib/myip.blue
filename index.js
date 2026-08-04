@@ -21,7 +21,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderPage } from "./lib/page.js";
-import { DOCS, DOCS_URL, ROBOTS } from "./lib/docs.js";
+import { DOCS, DOCS_URL, ROBOTS, SECURITY_TXT } from "./lib/docs.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -268,6 +268,11 @@ async function route(req, res, isTls) {
     status = 200;
   } else if (urlPath === "/robots.txt") {
     send(res, 200, "text/plain; charset=utf-8", ROBOTS);
+    status = 200;
+  } else if (urlPath === "/.well-known/security.txt") {
+    // Served by the app, not fronted by anything — see lib/docs.js for the
+    // Expires obligation that comes with it.
+    send(res, 200, "text/plain; charset=utf-8", SECURITY_TXT);
     status = 200;
   } else if (urlPath.startsWith("/static/")) {
     status = await serveStatic(req, res, urlPath);

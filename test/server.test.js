@@ -317,7 +317,7 @@ test("scripting clients get JSON, including ones that impersonate Mozilla", asyn
 });
 
 test("CORS is open on every response", async () => {
-  for (const path of ["/", "/ip", "/json", "/html", "/docs", "/llms.txt", "/robots.txt", "/nope"]) {
+  for (const path of ["/", "/ip", "/json", "/html", "/docs", "/llms.txt", "/robots.txt", "/.well-known/security.txt", "/nope"]) {
     const res = await get(path);
     assert.equal(res.headers.get("access-control-allow-origin"), "*", path);
   }
@@ -342,15 +342,32 @@ test("/robots.txt is permissive and points at the machine-readable docs", async 
   assert.ok(!/Disallow: \/\s*$/m.test(body), "must not disallow everything");
 });
 
+test("/.well-known/security.txt serves an unexpired RFC 9116 file", async () => {
+  const res = await get("/.well-known/security.txt");
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type"), /text\/plain/);
+  const body = await res.text();
+  // Both fields are mandatory under RFC 9116.
+  assert.match(body, /^Contact: mailto:.+@.+$/m);
+  const expires = body.match(/^Expires: (.+)$/m);
+  assert.ok(expires, "Expires is required");
+  // The whole failure mode is that this quietly goes stale: it keeps serving a
+  // 200 forever and nothing else in the stack notices. Fail the build instead.
+  assert.ok(
+    new Date(expires[1]) > new Date(),
+    `security.txt Expires has passed (${expires[1]}) — renew it here and on the edge zones`,
+  );
+});
+
 test("paths are case-sensitive — no lenient aliases", async () => {
   // Deliberate (Drew, 2026-08-02): case-insensitive matching was implemented and
   // then reverted, because an undocumented leniency becomes a contract as soon
   // as something depends on it, and then it cannot be removed.
-  for (const p of ["/JSON", "/Json", "/IP", "/Docs", "/LLMS.TXT", "/HTML", "/Robots.txt", "/STATIC/blue.jpg"]) {
+  for (const p of ["/JSON", "/Json", "/IP", "/Docs", "/LLMS.TXT", "/HTML", "/Robots.txt", "/.well-known/Security.txt", "/STATIC/blue.jpg"]) {
     assert.equal((await get(p)).status, 404, `${p} must NOT resolve`);
   }
   // The correctly-cased forms still work.
-  for (const p of ["/json", "/ip", "/docs", "/llms.txt", "/html", "/robots.txt", "/static/blue.jpg"]) {
+  for (const p of ["/json", "/ip", "/docs", "/llms.txt", "/html", "/robots.txt", "/.well-known/security.txt", "/static/blue.jpg"]) {
     assert.equal((await get(p)).status, 200, p);
   }
 });
