@@ -402,6 +402,34 @@ test("the edge listener serves the cf. view on loopback, and ONLY on loopback", 
   assert.equal(reached, false, `edge port must not be reachable on ${lan}`);
 });
 
+test("🛑 every client-error path answers or closes, and the server survives all of them", async () => {
+  const net = await import("node:net");
+  const raw = (port, payload, { reset = false } = {}) =>
+    new Promise((resolve) => {
+      let data = "";
+      const s = net.connect(port, "127.0.0.1", () => {
+        s.write(payload);
+        if (reset) setTimeout(() => { s.resetAndDestroy(); resolve("reset"); }, 50);
+      });
+      s.on("data", (d) => (data += d));
+      s.on("close", () => resolve(data.split("\r\n")[0] || "closed"));
+      s.on("error", () => resolve("closed"));
+    });
+  // Oversized headers → 431, as Node's default does (HPE_HEADER_OVERFLOW).
+  assert.match(await raw(PORT, `GET /ip HTTP/1.1\r\nHost: x\r\nX-Big: ${"a".repeat(20000)}\r\n\r\n`), /^HTTP\/1\.1 431 /);
+  // Malformed header line → 400.
+  assert.match(await raw(PORT, "GET /ip HTTP/1.1\r\nBad Header\r\n\r\n"), /^HTTP\/1\.1 400 /);
+  // Plain HTTP / junk at the TLS port → closed, no HTTP answer, no crash.
+  assert.doesNotMatch(await raw(TLS_PORT, "GET /ip HTTP/1.1\r\nHost: x\r\n\r\n"), /^HTTP\//);
+  assert.doesNotMatch(await raw(TLS_PORT, "\x16\x03\x01\x00\x05junk!"), /^HTTP\//);
+  // A client that resets mid-request, on both listeners.
+  await raw(PORT, "GET /ip HTTP/1.1\r\nHost: x\r\nX-Half:", { reset: true });
+  await raw(TLS_PORT, "\x16\x03\x01", { reset: true });
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal((await get("/ip")).status, 200, "server must survive every one of these");
+  assert.equal(server.exitCode, null, "server process must not have exited");
+});
+
 test("responses are not cacheable", async () => {
   assert.match((await get("/ip")).headers.get("cache-control"), /no-store/);
 });

@@ -412,17 +412,25 @@ const CLIENT_ERROR_STATUS = {
 // destroyed unlogged, as before. And destroy, never end(): end() half-closes,
 // so a client that never sends again keeps the socket (measured: the 5s
 // timeouts stopped closing anything).
+// 🛑 The socket is destroyed on EVERY path (finally), and nothing escapes: a
+// throw from a listener here is an uncaught exception and kills the process. A
+// Node upgrade that renames an error code degrades to "destroyed, unanswered".
 function onClientError(isTls) {
   return (err, socket) => {
-    const httpError = err.code?.startsWith("HPE_") || err.code === "ERR_HTTP_REQUEST_TIMEOUT";
-    if (!httpError || !socket.writable) return socket.destroy();
-    const status = CLIENT_ERROR_STATUS[err.code] ?? "400 Bad Request";
-    const { ip } = normaliseIp(socket.remoteAddress); // gone once destroyed
-    socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
-    socket.destroy();
-    console.log(
-      `${new Date().toISOString()} - ${ip} ${isTls ? "https" : "http"} - - "-" ${status.slice(0, 3)} 0.0ms`,
-    );
+    try {
+      const httpError = err?.code?.startsWith("HPE_") || err?.code === "ERR_HTTP_REQUEST_TIMEOUT";
+      if (!httpError || !socket.writable) return;
+      const status = CLIENT_ERROR_STATUS[err.code] ?? "400 Bad Request";
+      const { ip } = normaliseIp(socket.remoteAddress); // gone once destroyed
+      socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
+      console.log(
+        `${new Date().toISOString()} - ${ip} ${isTls ? "https" : "http"} - - "-" ${status.slice(0, 3)} 0.0ms`,
+      );
+    } catch {
+      // nothing to do: the finally below is the whole recovery
+    } finally {
+      socket.destroy();
+    }
   };
 }
 
