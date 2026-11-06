@@ -97,12 +97,13 @@ otherwise                                      -> JSON
 
 ## 🔴 Security — the invariants
 
-Four things hold the line. Each has a test that **fails when only that protection is broken** (verified by deliberately breaking each one, 2026-08-02) — if you change any of them, run `npm test` and believe it.
+Five things hold the line. Each has a test that **fails when only that protection is broken** (verified by deliberately breaking each one, 2026-08-02; #4 on 2026-11-06) — if you change any of them, run `npm test` and believe it.
 
 1. **`escapeHtml` in `lib/page.js`.** Request headers are attacker-controlled and are echoed into the page. Dropping pug moved auto-escaping into our code; this is the only thing standing between a header and stored XSS.
 2. **The `/static` traversal guard** — resolve the path, *then* require containment under `STATIC_DIR`. String-matching `..` is not equivalent; percent-encoding defeats it.
 3. **CF-* headers are trusted ONLY from loopback.** That is what makes the edge view safe: a direct request forging `CF-Connecting-IP` arrives from a real remote address and is treated as native, so it cannot claim to be someone else.
-4. **Zero dependencies.** No supply chain, nothing to audit. Keep it that way — the bar for adding a runtime dep is very high. (The old tree listed **`fs`** and **`https`** as npm dependencies: real packages squatting Node core module names, pulled in for imports that always resolved to core.)
+4. **`logField` in `index.js`** — Host and User-Agent are caller-written and Node passes spaces and `"` through; raw, a UA of `x" 200 1.0ms` forged a status field (2026-11-06). Escaped nginx-style; ordinary lines are byte-identical. The page's CSP (`PAGE_CSP`) is a second line behind `escapeHtml`, never instead of it.
+5. **Zero dependencies.** No supply chain, nothing to audit. Keep it that way — the bar for adding a runtime dep is very high. (The old tree listed **`fs`** and **`https`** as npm dependencies: real packages squatting Node core module names, pulled in for imports that always resolved to core.)
 
 ✅ **`GET /test/:host` was REMOVED (Drew, 2026-08-02).** It was an unauthenticated server-side fetch — a textbook SSRF primitive reachable at internal addresses and cloud metadata endpoints — whose only mitigation was a *host-level* setting. **Do not reintroduce a fetch-on-behalf endpoint** without deny-listing private/link-local/metadata ranges **after DNS resolution**, restricting schemes, refusing redirects, and rate limiting.
 
@@ -125,7 +126,7 @@ Canonical doc files, when this repo needs them: **`TODO.md`** (active work, `## 
 
 ## Gotchas
 
-- 🛑 **`server.timeout` is the only timeout that actually protects this service.** Measured on the production host with the production node (v22.22.0, 2026-08-02): a socket that opens and sends a partial request line is held **indefinitely** when only `requestTimeout` and `headersTimeout` are set — still open at 15 s. With `server.timeout` it closes on the dot. Node's docs present the other two as the DoS protection for a server with no reverse proxy, and for *this* case they do nothing. All four are set (5 s / 5 s / 4 s / 5 s); **do not "tidy up" `server.timeout` on the grounds that the documented ones cover it.**
+- 🛑 **`server.timeout` is the only timeout that actually protects this service.** Measured on the production host with the production node (v22.22.0, 2026-08-02): a socket that opens and sends a partial request line is held **indefinitely** when only `requestTimeout` and `headersTimeout` are set — still open at 15 s. With `server.timeout` it closes on the dot. Node's docs present the other two as the DoS protection for a server with no reverse proxy, and for *this* case they do nothing. All four are set (5 s / 5 s / 4 s / 5 s); **do not "tidy up" `server.timeout` on the grounds that the documented ones cover it.** 🛑 **And none of the four reaches a socket before its TLS handshake ends** — `handshakeTimeout` (tls default 120 s) does; :443 held a silent socket ≥20 s without it (2026-11-06). Test cert: `test/fixtures/`, self-signed, test-only.
 - ⚠️ **Container `HEALTHCHECK` must be exec-form and name node by absolute path.** Distroless has no shell, so `HEALTHCHECK CMD curl …` is impossible, and `HEALTHCHECK` does **not** inherit `ENTRYPOINT` — hence `["/nodejs/bin/node", "/app/lib/healthcheck.js"]`.
 
 - 🛑 **The Mac's `node` is brew's latest, not 22; this project targets 22. Verify on 22 before trusting a green run:** `docker run --rm -v "$PWD:/app" -w /app node:22-slim npm test`. **This already bit once** — `"test": "node --test test/"` passed on Node 20 and failed on 22, which resolves the directory as a *module path* (`Cannot find module …/test`). `node --test` with no argument auto-discovers and works on both.

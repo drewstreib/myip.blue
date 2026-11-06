@@ -10,7 +10,9 @@ import { spawn } from "node:child_process";
 import os from "node:os";
 
 const PORT = 18080;
+const TLS_PORT = 18443;
 let server;
+let serverLog = ""; // the access log, so tests can assert what a parser would read
 
 // A non-loopback address for this host, used to prove that CF-* headers are
 // NOT trusted from off-box. Without it that half of the check is untested.
@@ -24,10 +26,18 @@ function lanAddress() {
 }
 
 before(async () => {
+  // The fixture cert is a throwaway self-signed localhost pair, test-only.
   server = spawn(process.execPath, ["index.js"], {
-    env: { ...process.env, HTTP_PORT: String(PORT), TLS_KEY: "/nonexistent", TLS_CERT: "/nonexistent" },
-    stdio: "ignore",
+    env: {
+      ...process.env,
+      HTTP_PORT: String(PORT),
+      HTTPS_PORT: String(TLS_PORT),
+      TLS_KEY: "test/fixtures/localhost-key.pem",
+      TLS_CERT: "test/fixtures/localhost-cert.pem",
+    },
+    stdio: ["ignore", "pipe", "ignore"],
   });
+  server.stdout.on("data", (d) => (serverLog += d));
   for (let i = 0; i < 50; i++) {
     try {
       await fetch(`http://127.0.0.1:${PORT}/ip`);
@@ -219,6 +229,54 @@ test("absolute-form is honoured; a target with no path is a 400, never a 500", a
   assert.equal(await rawStatus("http://[bad/"), 400);
   assert.equal(await rawStatus("*"), 400);
   assert.equal(await rawStatus("*", "OPTIONS"), 204);
+});
+
+test("🛑 Host and User-Agent cannot forge or shift access-log fields", async () => {
+  const net = await import("node:net");
+  const marker = `forge-${Date.now()}`;
+  await new Promise((resolve, reject) => {
+    const sock = net.connect(PORT, "127.0.0.1", () =>
+      sock.write(
+        `GET /ip HTTP/1.1\r\nHost: a b\r\nUser-Agent: ${marker}" 200 1.0ms\\\r\nConnection: close\r\n\r\n`,
+      ),
+    );
+    sock.on("data", () => {});
+    sock.on("end", resolve);
+    sock.on("error", reject);
+  });
+  await new Promise((r) => setTimeout(r, 200));
+  const line = serverLog.split("\n").find((l) => l.includes(marker));
+  assert.ok(line, "request must be logged");
+  assert.match(line, / http a\\x20b \/ip "forge-\d+\\x22 200 1\.0ms\\x5c" 200 [\d.]+ms$/);
+  // A plain browser UA keeps its spaces: escaping must not change ordinary lines.
+  await get("/ip", { headers: { "user-agent": `Mozilla/5.0 (X11) ${marker}-plain` } });
+  await new Promise((r) => setTimeout(r, 200));
+  assert.ok(serverLog.includes(`"Mozilla/5.0 (X11) ${marker}-plain" 200`));
+});
+
+test("🛑 a TLS client that never handshakes is cut off quickly", async () => {
+  // server.timeout reaches a socket only after the handshake; without
+  // handshakeTimeout tls holds a silent socket for 120s.
+  const net = await import("node:net");
+  const started = Date.now();
+  const closed = await new Promise((resolve) => {
+    const sock = net.connect(TLS_PORT, "127.0.0.1");
+    sock.on("close", () => resolve(true));
+    sock.on("error", () => resolve(true));
+    setTimeout(() => { sock.destroy(); resolve(false); }, 8000);
+  });
+  assert.ok(closed, `silent TLS socket must be closed (took ${Date.now() - started}ms)`);
+});
+
+test("the page carries a CSP that allows only its inline style", async () => {
+  for (const path of ["/html", "/"]) {
+    const res = await get(path, { headers: { accept: "text/html" } });
+    assert.equal(
+      res.headers.get("content-security-policy"),
+      "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
+      path,
+    );
+  }
 });
 
 test("responses are not cacheable", async () => {

@@ -19,6 +19,7 @@ import https from "node:https";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { pipeline } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { renderPage } from "./lib/page.js";
 import { DOCS, DOCS_URL, ROBOTS, SECURITY_TXT } from "./lib/docs.js";
@@ -185,11 +186,23 @@ async function serveStatic(req, res, urlPath) {
       "Content-Length": stat.size,
       "X-Content-Type-Options": "nosniff",
     });
-    fs.createReadStream(target).pipe(res);
+    // pipeline, not pipe: a read error after the headers would otherwise be an
+    // unhandled 'error' event — which kills the process — and leave res open.
+    pipeline(fs.createReadStream(target), res, () => {});
     return 200;
   } catch {
     return notFound(res);
   }
+}
+
+// The page has no script and no subresources — only inline style — so nothing
+// is allowed but that. A second line behind escapeHtml, not a replacement.
+const PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";
+
+function sendPage(res, payload) {
+  send(res, 200, "text/html; charset=utf-8", renderPage(payload), {
+    "Content-Security-Policy": PAGE_CSP,
+  });
 }
 
 function notFound(res) {
@@ -261,7 +274,7 @@ async function route(req, res, isTls) {
   if (urlPath === "/" || urlPath === "") {
     const form = preferredForm(req);
     if (form === "html") {
-      send(res, 200, "text/html; charset=utf-8", renderPage(payload));
+      sendPage(res, payload);
     } else if (form === "text") {
       send(res, 200, "text/plain; charset=utf-8", clientIp + "\n");
     } else {
@@ -277,7 +290,7 @@ async function route(req, res, isTls) {
   } else if (urlPath === "/html" || urlPath === "/html/") {
     // Forces the page regardless of what the client asked for. Completes the
     // set: /ip, /json and /html each pin one form, and `/` negotiates.
-    send(res, 200, "text/html; charset=utf-8", renderPage(payload));
+    sendPage(res, payload);
     status = 200;
   } else if (urlPath === "/docs" || urlPath === "/docs/" || urlPath === "/llms.txt") {
     // Markdown served as text/plain on purpose: it renders readably raw, and a
@@ -301,6 +314,16 @@ async function route(req, res, isTls) {
   return { status, clientIp, connection };
 }
 
+// Host and User-Agent are the caller's to write, and Node lets spaces and `"`
+// through, so raw they can forge or shift the fields a log parser reads. Escape
+// as nginx does (`"`, `\`, control and non-ASCII → \xHH), plus space in the
+// unquoted fields. Ordinary values come out byte-identical.
+function logField(value, { quoted = false } = {}) {
+  if (value === undefined) return "-";
+  const unsafe = quoted ? /["\\\x00-\x1f\x7f-￿]/g : /["\\\x00-\x20\x7f-￿]/g;
+  return String(value).replace(unsafe, (c) => "\\x" + c.charCodeAt(0).toString(16).padStart(2, "0"));
+}
+
 // Static is served through the same handler as everything else so that static
 // hits are logged — the original mounted it after the logger deliberately.
 function handler(isTls) {
@@ -313,13 +336,15 @@ function handler(isTls) {
       ({ status, clientIp, connection } = await route(req, res, isTls));
     } catch (err) {
       if (!res.headersSent) send(res, 500, "text/plain; charset=utf-8", "Blue broke!");
-      console.error(`${new Date().toISOString()} - error ${req.method} ${req.url}:`, err);
+      // route() threw before returning who called; the 500 line needs it most.
+      ({ clientIp, connection } = describe(req, isTls));
+      console.error(`${new Date().toISOString()} - error ${req.method} ${logField(req.url)}:`, err);
     } finally {
       const ms = Number(process.hrtime.bigint() - started) / 1e6;
       const proto = connection.protocol ?? (isTls ? "https" : "http");
       console.log(
-        `${new Date().toISOString()} - ${clientIp} ${proto} ${req.headers.host ?? "-"} ${req.url} ` +
-          `"${req.headers["user-agent"] ?? "-"}" ${status} ${ms.toFixed(1)}ms`,
+        `${new Date().toISOString()} - ${clientIp} ${proto} ${logField(req.headers.host)} ${logField(req.url)} ` +
+          `"${logField(req.headers["user-agent"], { quoted: true })}" ${status} ${ms.toFixed(1)}ms`,
       );
     }
   };
@@ -375,7 +400,11 @@ const tls = loadTls();
 if (tls) {
   // Certs are read once here. A renewal needs a restart — there is no reverse
   // proxy in front, so that restart is user-visible downtime.
-  const httpsServer = tune(https.createServer(tls, handler(true)));
+  // 🛑 handshakeTimeout: tune()'s server.timeout reaches a socket only once the
+  // handshake is done, so a client that opens :443 and sends nothing was held
+  // for tls's 120s default (measured 2026-11-06: :80 closed at 5s, :443 still
+  // open at 20s).
+  const httpsServer = tune(https.createServer({ ...tls, handshakeTimeout: 5000 }, handler(true)));
   httpsServer.listen(HTTPS_PORT, () =>
     console.log(`${new Date().toISOString()} - https listening on ${HTTPS_PORT}`),
   );
