@@ -12,7 +12,10 @@
 # temporarily on node:22-slim rather than adding a shell to this image.
 #
 # The base image's ENTRYPOINT is already `node`, so CMD is just the script.
-FROM gcr.io/distroless/nodejs22-debian12:nonroot
+# Pinned by digest so a build is reproducible and a moved tag cannot change it;
+# Dependabot (`.github/dependabot.yml`) bumps the digest, which is also what
+# brings Node security releases in on a schedule rather than on our next push.
+FROM gcr.io/distroless/nodejs22-debian12:nonroot@sha256:13593b7570658e8477de39e2f4a1dd25db2f836d68a0ba771251572d23bb4f8e
 
 WORKDIR /app
 

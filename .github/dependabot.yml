@@ -1,0 +1,12 @@
+# Keeps the two things this repo pins moving: the workflow's action SHAs and
+# the Dockerfile's base-image digest. There are no npm dependencies to watch.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
