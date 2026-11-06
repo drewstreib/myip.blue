@@ -16,6 +16,7 @@
 
 import http from "node:http";
 import https from "node:https";
+import net from "node:net";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -66,24 +67,27 @@ function isLoopback(addr) {
 // 🛑 CF-* headers are only trusted from loopback — i.e. from cloudflared running
 // beside us. A direct request carrying a forged CF-Connecting-IP arrives from a
 // real remote address and is treated as native, so it cannot spoof its own IP.
+// The address must also BE an address: it is echoed and logged as clientIp,
+// so anything else would be a free-text field in the access log.
 function isEdgeRequest(req) {
-  return isLoopback(req.socket.remoteAddress) && Boolean(req.headers["cf-connecting-ip"]);
+  return isLoopback(req.socket.remoteAddress) && net.isIP(req.headers["cf-connecting-ip"] ?? "") !== 0;
 }
 
 function describe(req, isTls) {
   if (isEdgeRequest(req)) {
     const { ip, family } = normaliseIp(req.headers["cf-connecting-ip"]);
     const ray = req.headers["cf-ray"] ?? "";
+    const proto = (req.headers["x-forwarded-proto"] ?? "").toLowerCase();
     const connection = {
       via: "cloudflare",
-      protocol: (req.headers["x-forwarded-proto"] ?? "https").toLowerCase(),
+      protocol: proto === "http" ? "http" : "https",
       remoteFamily: family,
     };
     // Populated by Cloudflare managed transforms; omitted rather than shown
     // empty when a given header is not configured.
     const edge = {
       country: req.headers["cf-ipcountry"],
-      colo: ray.includes("-") ? ray.split("-").pop() : undefined,
+      colo: ray.split("-").slice(1).pop() || undefined,
       ray: ray || undefined,
       tlsVersion: req.headers["cf-tls-version"],
       tlsCipher: req.headers["cf-tls-cipher"],
@@ -109,22 +113,23 @@ function describe(req, isTls) {
 
 // ── responses ────────────────────────────────────────────────────────────────
 
+// On EVERY response — routes, errors, static and OPTIONS alike.
+const COMMON_HEADERS = {
+  // Every response is a point-in-time measurement; caching one is always wrong.
+  "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+  Pragma: "no-cache",
+  Expires: "0",
+  "Surrogate-Control": "no-store",
+  "X-Content-Type-Options": "nosniff",
+  // Everything here describes the caller and is already known to them, and no
+  // credentials or cookies are involved — so "*" gives up nothing and lets
+  // browser-based tooling actually read the response. Without it the
+  // same-origin policy blocks every in-page caller.
+  "Access-Control-Allow-Origin": "*",
+};
+
 function send(res, status, type, body, extraHeaders = {}) {
-  res.writeHead(status, {
-    "Content-Type": type,
-    // Every response is a point-in-time measurement; caching one is always wrong.
-    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
-    Pragma: "no-cache",
-    Expires: "0",
-    "Surrogate-Control": "no-store",
-    "X-Content-Type-Options": "nosniff",
-    // Everything here describes the caller and is already known to them, and no
-    // credentials or cookies are involved — so "*" gives up nothing and lets
-    // browser-based tooling actually read the response. Without it the
-    // same-origin policy blocks every in-page caller.
-    "Access-Control-Allow-Origin": "*",
-    ...extraHeaders,
-  });
+  res.writeHead(status, { ...COMMON_HEADERS, "Content-Type": type, ...extraHeaders });
   res.end(body);
 }
 
@@ -181,11 +186,7 @@ async function serveStatic(req, res, urlPath) {
     const stat = await fsp.stat(target);
     if (!stat.isFile()) return notFound(res);
     const type = CONTENT_TYPES[path.extname(target).toLowerCase()] ?? "application/octet-stream";
-    res.writeHead(200, {
-      "Content-Type": type,
-      "Content-Length": stat.size,
-      "X-Content-Type-Options": "nosniff",
-    });
+    res.writeHead(200, { ...COMMON_HEADERS, "Content-Type": type, "Content-Length": stat.size });
     // pipeline, not pipe: a read error after the headers would otherwise be an
     // unhandled 'error' event — which kills the process — and leave res open.
     pipeline(fs.createReadStream(target), res, () => {});
@@ -232,8 +233,8 @@ async function route(req, res, isTls) {
 
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
+      ...COMMON_HEADERS,
       Allow: "GET, HEAD, OPTIONS",
-      "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
       "Access-Control-Allow-Headers": "Accept, Content-Type",
       "Access-Control-Max-Age": "86400",
@@ -242,7 +243,10 @@ async function route(req, res, isTls) {
     return { status: 204, clientIp, connection };
   }
 
-  if (urlPath === null) {
+  // RFC 9112 §3.2: an HTTP/1.1 request with no Host, or more than one, MUST get
+  // a 400.
+  const hosts = req.headersDistinct.host?.length ?? 0;
+  if (urlPath === null || hosts > 1 || (hosts === 0 && req.httpVersion === "1.1")) {
     send(res, 400, "text/plain; charset=utf-8", "Sorry! Blue can't read that!");
     return { status: 400, clientIp, connection };
   }
@@ -371,9 +375,58 @@ function loadTls() {
 // 5s is already catastrophic-failure territory, not a slow client. Node's
 // defaults (headersTimeout 60s, requestTimeout 5min, keepAliveTimeout 65s) are
 // sized for a server behind a reverse proxy — there is none here, node faces the
-// internet directly on a 405MB box, and Node's own docs say both timeouts must
+// internet directly on a small box, and Node's own docs say both timeouts must
 // be non-zero in exactly that situation.
-function tune(server) {
+// connectionsCheckingInterval is how often requestTimeout/headersTimeout are
+// enforced at all (default 30s): left alone, a request that drips a byte every
+// 3s was held 27s, not 5s (measured 2026-11-06).
+// requireHostHeader: false only moves the RFC's no-Host 400 into route(), where
+// it is logged; Node's own answer to it never reached the access log.
+const SERVER_OPTIONS = { connectionsCheckingInterval: 1000, requireHostHeader: false };
+
+// 🛑 Connection caps — the only bound on a connection FLOOD. Keep-alive that
+// re-requests every 4s trips no timeout, and each idle TLS connection costs
+// ~65 KB, mostly native (not V8 heap, so --max-old-space-size is no help):
+// one client OOM-killed the container at ~1,500 TLS connections (measured
+// 2026-11-06), taking down every front door including the cf. tunnel, which
+// shares the :80 listener. Sized so both servers full stay under the container
+// memory limit; plain HTTP costs ~6 KB per connection. A cap turns the crash
+// into refused connections; telling one abusive source from everyone else is
+// a per-IP limit, which belongs in the host firewall, not here.
+const MAX_HTTP_CONNECTIONS = 2000;
+const MAX_TLS_CONNECTIONS = 1000;
+
+// Node's parser answers malformed requests itself, before any handler runs, so
+// by default they never reach the access log — and that is most scanner
+// traffic. Same response as Node's default (400, 431 for oversized headers, 408
+// for a timeout), plus a log line in the access-log format.
+const CLIENT_ERROR_STATUS = {
+  HPE_HEADER_OVERFLOW: "431 Request Header Fields Too Large",
+  ERR_HTTP_REQUEST_TIMEOUT: "408 Request Timeout",
+};
+
+// ⚠️ https forwards TLS handshake failures (incl. handshakeTimeout) here too, so
+// only the HTTP parser's own errors get an HTTP answer; everything else is
+// destroyed unlogged, as before. And destroy, never end(): end() half-closes,
+// so a client that never sends again keeps the socket (measured: the 5s
+// timeouts stopped closing anything).
+function onClientError(isTls) {
+  return (err, socket) => {
+    const httpError = err.code?.startsWith("HPE_") || err.code === "ERR_HTTP_REQUEST_TIMEOUT";
+    if (!httpError || !socket.writable) return socket.destroy();
+    const status = CLIENT_ERROR_STATUS[err.code] ?? "400 Bad Request";
+    const { ip } = normaliseIp(socket.remoteAddress); // gone once destroyed
+    socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
+    socket.destroy();
+    console.log(
+      `${new Date().toISOString()} - ${ip} ${isTls ? "https" : "http"} - - "-" ${status.slice(0, 3)} 0.0ms`,
+    );
+  };
+}
+
+function tune(server, maxConnections, isTls) {
+  server.maxConnections = maxConnections;
+  server.on("clientError", onClientError(isTls));
   // 🛑 server.timeout IS THE ONE THAT ACTUALLY WORKS. Measured on the production
   // host with the production node (v22.22.0, 2026-08-02): a socket that opens
   // and sends only "GET /ip HTTP/1.1\r\n" is held **indefinitely** with
@@ -390,7 +443,7 @@ function tune(server) {
 
 const servers = [];
 
-const httpServer = tune(http.createServer(handler(false)));
+const httpServer = tune(http.createServer(SERVER_OPTIONS, handler(false)), MAX_HTTP_CONNECTIONS, false);
 httpServer.listen(HTTP_PORT, () =>
   console.log(`${new Date().toISOString()} - http listening on ${HTTP_PORT}`),
 );
@@ -404,7 +457,11 @@ if (tls) {
   // handshake is done, so a client that opens :443 and sends nothing was held
   // for tls's 120s default (measured 2026-11-06: :80 closed at 5s, :443 still
   // open at 20s).
-  const httpsServer = tune(https.createServer({ ...tls, handshakeTimeout: 5000 }, handler(true)));
+  const httpsServer = tune(
+    https.createServer({ ...tls, ...SERVER_OPTIONS, handshakeTimeout: 5000 }, handler(true)),
+    MAX_TLS_CONNECTIONS,
+    true,
+  );
   httpsServer.listen(HTTPS_PORT, () =>
     console.log(`${new Date().toISOString()} - https listening on ${HTTPS_PORT}`),
   );

@@ -279,6 +279,111 @@ test("the page carries a CSP that allows only its inline style", async () => {
   }
 });
 
+test("🛑 a request that drips headers is cut off near 5s, not on Node's 30s sweep", async () => {
+  // connectionsCheckingInterval: without it requestTimeout is only checked
+  // every 30s and this socket was held 27s (2026-11-06).
+  const net = await import("node:net");
+  const started = Date.now();
+  const closed = await new Promise((resolve) => {
+    let iv;
+    const sock = net.connect(PORT, "127.0.0.1", () => {
+      sock.write("GET /ip HTTP/1.1\r\nHost: x\r\n");
+      iv = setInterval(() => sock.write("X-Drip: 1\r\n"), 1000);
+    });
+    sock.on("data", () => {});
+    sock.on("close", () => { clearInterval(iv); resolve(true); });
+    sock.on("error", () => {});
+    setTimeout(() => { clearInterval(iv); sock.destroy(); resolve(false); }, 9000);
+  });
+  assert.ok(closed && Date.now() - started < 9000, `held ${Date.now() - started}ms`);
+});
+
+test("🛑 the TLS listener refuses connections past its cap instead of exhausting memory", async () => {
+  // ~65 KB per idle TLS connection; ~1,500 OOM-killed the container (2026-11-06).
+  const tls = await import("node:tls");
+  const CAP = 1000;
+  const socks = [];
+  const open = () =>
+    new Promise((resolve) => {
+      const s = tls.connect({ host: "127.0.0.1", port: TLS_PORT, rejectUnauthorized: false });
+      socks.push(s);
+      s.on("secureConnect", () => resolve("open"));
+      s.on("error", () => resolve("refused"));
+      s.on("close", () => resolve("refused"));
+    });
+  try {
+    for (let i = 0; i < CAP; i += 100) {
+      const batch = await Promise.all(Array.from({ length: 100 }, open));
+      assert.ok(batch.every((r) => r === "open"), `connection ${i}..${i + 99} under the cap must open`);
+    }
+    assert.equal(await open(), "refused", "connection past the cap must be refused");
+  } finally {
+    for (const s of socks) s.destroy();
+  }
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal((await get("/ip")).status, 200, "server must survive");
+});
+
+test("🛑 edge headers from loopback must be well-formed to be believed", async () => {
+  // Forged-looking values must not become free text in the log or the JSON.
+  const body = await (
+    await get("/json", {
+      headers: { "cf-connecting-ip": '6.6.6.6 https x /admin "curl" 200 0.1ms', "x-forwarded-proto": 'HTTPS x" 999' },
+    })
+  ).json();
+  assert.equal(body.clientIp, "127.0.0.1", "a non-address CF-Connecting-IP is not an edge request");
+  assert.equal(body.connection.via, undefined);
+  const edge = await (
+    await get("/json", {
+      headers: { "cf-connecting-ip": "203.0.113.9", "x-forwarded-proto": 'HTTPS x" 999', "cf-ray": "abc-" },
+    })
+  ).json();
+  assert.equal(edge.clientIp, "203.0.113.9");
+  assert.equal(edge.connection.protocol, "https", "only http/https are reported");
+  assert.equal("colo" in edge.connection, false, "an empty colo is omitted, not reported empty");
+});
+
+test("static and OPTIONS responses carry the same CORS and no-store headers as everything else", async () => {
+  for (const res of [await get("/static/blue.jpg"), await get("/ip", { method: "OPTIONS" })]) {
+    assert.equal(res.headers.get("access-control-allow-origin"), "*", res.url);
+    assert.match(res.headers.get("cache-control") ?? "", /no-store/, res.url);
+  }
+});
+
+test("a request with two Host fields is a 400 (RFC 9112 §3.2)", async () => {
+  const net = await import("node:net");
+  const status = await new Promise((resolve, reject) => {
+    let data = "";
+    const sock = net.connect(PORT, "127.0.0.1", () =>
+      sock.write("GET /ip HTTP/1.1\r\nHost: a\r\nHost: b\r\nConnection: close\r\n\r\n"),
+    );
+    sock.on("data", (d) => (data += d));
+    sock.on("end", () => resolve(Number(data.split(" ")[1])));
+    sock.on("error", reject);
+  });
+  assert.equal(status, 400);
+});
+
+test("requests rejected before routing still get a 400 and reach the access log", async () => {
+  const net = await import("node:net");
+  const send = (raw) =>
+    new Promise((resolve) => {
+      let data = "";
+      const sock = net.connect(PORT, "127.0.0.1", () => sock.write(raw));
+      sock.on("data", (d) => (data += d));
+      sock.on("close", () => resolve(Number(data.split(" ")[1])));
+      sock.on("error", () => resolve(NaN));
+    });
+  const marker = `nohost-${Date.now()}`;
+  // A malformed header line: Node's parser rejects it (clientError path).
+  assert.equal(await send("GET /ip HTTP/1.1\r\nBad Header\r\n\r\n"), 400);
+  // HTTP/1.1 with no Host: RFC 9112 §3.2 MUST-400, answered by our handler.
+  assert.equal(await send(`GET /${marker} HTTP/1.1\r\nConnection: close\r\n\r\n`), 400);
+  await new Promise((r) => setTimeout(r, 200));
+  assert.match(serverLog, / 127\.0\.0\.1 http - - "-" 400 0\.0ms\n/, "the parser-level 400 is logged");
+  assert.match(serverLog, new RegExp(` 127\\.0\\.0\\.1 http - /${marker} "-" 400 `), "the no-Host 400 is logged");
+});
+
 test("responses are not cacheable", async () => {
   assert.match((await get("/ip")).headers.get("cache-control"), /no-store/);
 });
@@ -468,14 +573,18 @@ test("slow/incomplete requests are cut off quickly (DoS timeouts)", async () => 
   // default. Budget 8s so the test is not flaky on a loaded machine.
   const net = await import("node:net");
   const started = Date.now();
+  let got = "";
   const closed = await new Promise((resolve) => {
     const sock = net.connect(PORT, "127.0.0.1", () => sock.write("GET /ip HTTP/1.1\r\n"));
+    // Read, or the server's FIN queues behind its unread 408 and close never fires.
+    sock.on("data", (d) => (got += d));
     sock.on("close", () => resolve(true));
     sock.on("error", () => resolve(true));
     setTimeout(() => { sock.destroy(); resolve(false); }, 8000);
   });
   const elapsed = Date.now() - started;
   assert.ok(closed, "server must close an incomplete request");
+  assert.match(got, /^HTTP\/1\.1 408 /, "and say why, as Node's default does");
   // ~5s expected. Budget 8s so it is not flaky on a loaded machine, but this
   // WILL catch a regression to Node's 60s+ defaults.
   assert.ok(elapsed < 8000, `must close promptly (took ${elapsed}ms)`);
