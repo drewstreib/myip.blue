@@ -1,5 +1,6 @@
-# Keeps the two things this repo pins moving: the workflow's action SHAs and
-# the Dockerfile's base-image digest. There are no npm dependencies to watch.
+# Keeps everything this repo pins moving: the workflow's action SHAs, the
+# Dockerfile's two base-image digests (the golang one is how Go point releases
+# reach the binary) and the Go module requirements.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -7,6 +8,10 @@ updates:
     schedule:
       interval: weekly
   - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
     directory: /
     schedule:
       interval: weekly

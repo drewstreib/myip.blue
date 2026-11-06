@@ -1,30 +1,24 @@
-# Zero runtime dependencies, so there is no install stage and no node_modules.
+# Two stages: build a static binary, ship it alone on distroless/static (no
+# shell, no package manager, no libc — CGO is off, so none is needed).
 #
-# ⚠️ NOT alpine. Node classifies linux-musl as support tier "Experimental" —
-# "may not compile or test suite may not pass", and the core team does not
-# create releases for it (nodejs/node BUILDING.md). nodejs/docker-node
-# recommends the Debian variants for production.
-#
-# Distroless over node:22-slim, measured 2026-08-02: 155MB vs 247MB, both
-# glibc/Debian 12, and this one ships no shell and no package manager.
-# ⚠️ The trade: you cannot `docker exec sh` into it. Acceptable here — one
-# process, no deps, logs go off-box. To debug interactively, rebuild
-# temporarily on node:22-slim rather than adding a shell to this image.
-#
-# The base image's ENTRYPOINT is already `node`, so CMD is just the script.
-# Pinned by digest so a build is reproducible and a moved tag cannot change it;
-# Dependabot (`.github/dependabot.yml`) bumps the digest, which is also what
-# brings Node security releases in on a schedule rather than on our next push.
-FROM gcr.io/distroless/nodejs22-debian12:nonroot@sha256:13593b7570658e8477de39e2f4a1dd25db2f836d68a0ba771251572d23bb4f8e
-
-WORKDIR /app
-
-# Copy explicitly rather than `COPY . .` — nothing enters the image that is not
-# named here, so a stray file in the working tree cannot be shipped by accident.
-COPY package.json ./
-COPY index.js ./
-COPY lib ./lib
+# The build stage runs on the BUILD platform and cross-compiles for the target
+# (Docker's documented multi-platform Go pattern), so the arm64 image needs no
+# emulation. Both bases are pinned by digest; Dependabot
+# (`.github/dependabot.yml`) bumps them, which is how Go point releases reach
+# the image.
+FROM --platform=$BUILDPLATFORM golang:1.27-trixie@sha256:af1bfc2614ebb1dbd31af514b78740fd678850e76498762b425ecee4c5c6ea80 AS build
+ARG TARGETOS TARGETARCH
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+# Copy explicitly rather than `COPY . .` — nothing enters the binary that is not
+# named here. static/ is compiled in (embed).
+COPY *.go ./
 COPY static ./static
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /myip .
+
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329
+COPY --from=build /myip /myip
 
 # The base image's USER is 65532 (nonroot). ⚠️ In production compose overrides
 # this to uid 0 with `cap_drop: ALL` + `cap_add: NET_BIND_SERVICE`, because
@@ -33,10 +27,9 @@ COPY static ./static
 # is fine only on ports above 1024.
 EXPOSE 80 443
 
-# Exec form is required: distroless has no shell, so the usual
-# `HEALTHCHECK CMD curl ...` is impossible. HEALTHCHECK does not inherit
-# ENTRYPOINT, hence the absolute path to node.
+# Exec form is required: distroless has no shell. The binary is its own check
+# (plain HTTP on loopback — see healthcheck() in main.go).
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD ["/nodejs/bin/node", "/app/lib/healthcheck.js"]
+  CMD ["/myip", "healthcheck"]
 
-CMD ["index.js"]
+ENTRYPOINT ["/myip"]

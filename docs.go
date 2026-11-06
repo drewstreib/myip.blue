@@ -1,12 +1,14 @@
+package main
+
 // The /docs endpoint: markdown, served as text/plain.
 //
-// Same content as the HTML page's Usage section — keep the two in sync, they
-// are the service's public contract stated twice for two audiences (a browser
-// and something parsing text). If you change a route, change both.
+// Same CONTRACT as the HTML page's Usage section, stated twice for two
+// audiences (a browser and something parsing text) — change a route, change
+// both. The prose is allowed to differ.
 
-export const DOCS_URL = "https://myip.blue/docs";
+const docsURL = "https://myip.blue/docs"
 
-export const DOCS = `# myip.blue
+const docs = `# myip.blue
 
 An always-available endpoint for four questions about yourself: am I online,
 what is my public IP, what time is it, and how does my HTTP client actually
@@ -76,6 +78,10 @@ Trailing slashes are accepted on /ip, /json, /html and /docs.
 
   Responses are never cached (no-store).
 
+  TLS 1.0 through 1.3 are accepted, with every cipher suite the server still
+  implements, weak ones included -- on purpose, so an old client can see what
+  it actually negotiates. The floor: no SSLv3, no DHE, export or NULL suites.
+
   CORS is open (Access-Control-Allow-Origin: *), so browser-based tools can
   read this directly. Nothing here is secret: it is all about you.
 
@@ -91,22 +97,22 @@ Trailing slashes are accepted on /ip, /json, /html and /docs.
   curl -H 'Accept: text/plain' myip.blue     # 1.2.3.4
   curl myip.blue/html                        # the page, forced
   curl cf.myip.blue/json                     # the edge's view
-`;
+`
 
-// Permissive: this is a public diagnostic service with nothing to hide and
-// nothing expensive to crawl. The comment is the only way to point a crawler at
-// the machine-readable docs — robots.txt has no standard directive for it.
-export const ROBOTS = `User-agent: *
+// Permissive: a public diagnostic service with nothing to hide and nothing
+// expensive to crawl. The comment is the only way to point a crawler at the
+// machine-readable docs — robots.txt has no standard directive for it.
+const robots = `User-agent: *
 Allow: /
 
 # Machine-readable docs: https://myip.blue/llms.txt
-`;
+`
 
 // RFC 9116. Compiled in rather than served from static/ because it is a service
-// route, not an asset — same as ROBOTS above.
+// route, not an asset.
 //
 // Expires is a live obligation: past that date the file is formally invalid and
 // nothing anywhere complains, it just keeps serving. Renew before it lands.
-export const SECURITY_TXT = `Contact: mailto:dtype@dtype.org
+const securityTxt = `Contact: mailto:dtype@dtype.org
 Expires: 2027-08-01T00:00:00Z
-`;
+`

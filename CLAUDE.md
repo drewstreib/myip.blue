@@ -1,6 +1,6 @@
 # myip.blue
 
-Small zero-dependency Node service: tells you your public IP, plus the headers and TLS details of how you connected. Live at **myip.blue** (+ `v4.` / `v6.` / `cf.`), hosted by alt.org.
+Small Go service (stdlib + `golang.org/x/net/netutil`): tells you your public IP, plus the headers and TLS details of how you connected. Live at **myip.blue** (+ `v4.` / `v6.` / `cf.`), hosted by alt.org.
 
 **This file is the signpost.** Loaded every session in this subtree. Keep it terse and current.
 
@@ -54,7 +54,7 @@ Doc conventions in full → **`/d:docs`**, which also runs the end-of-session pa
 | `GET /html` | The HTML page, forced, whatever the client asked for. |
 | `GET /docs` , `/llms.txt` | The docs as markdown served `text/plain`. Byte-identical at both paths. |
 | `GET /robots.txt` | Permissive (`Allow: /`), with a comment pointing crawlers at `/llms.txt`. |
-| `GET /.well-known/security.txt` | RFC 9116, compiled in (`SECURITY_TXT`). ⚠️ **`Expires` is a live obligation** — a test fails the build once it passes, and the same date is published by 33 other zones out-of-band, so renew both together. |
+| `GET /.well-known/security.txt` | RFC 9116, compiled in (`securityTxt`). ⚠️ **`Expires` is a live obligation** — a test fails the build once it passes, and the same date is published by 33 other zones out-of-band, so renew both together. |
 | `GET /static/*` | Static files. Currently just `blue.jpg`, linked from the page footer. |
 | anything else | `404` with the body `Sorry! Blue can't find that!` (non-GET/HEAD → `405`, same body) |
 
@@ -64,7 +64,7 @@ Trailing slashes resolve on `/ip`, `/json`, `/html`, `/docs`. **`OPTIONS` → `2
 
 **Paths are CASE-SENSITIVE and there are no lenient aliases.** Case-insensitive matching was built and then reverted the same day (Drew, 2026-08-02: *"i don't want /JSON. might make people rely on a wrong behavior… let's just make it work correctly"*). The reasoning generalises: **an undocumented leniency becomes a contract the moment something depends on it**, and then it cannot be removed. A test asserts `/JSON` and friends 404.
 
-⚠️ **Never assert `/static/BLUE.JPG` 404s in a test.** macOS (APFS) is case-**in**sensitive by default and serves it; the Linux host does not. That asserts the OS, not this code, and fails only on a developer Mac — assert on a path prefix, which is ours.
+Static files are embedded, so their case-sensitivity no longer depends on the filesystem (under Node, macOS served `/static/BLUE.JPG`).
 
 🛑 **`/` DEFAULTS TO JSON since 2026-08-02 — this deliberately broke `curl myip.blue` → bare IP** (Drew: *"i'm ok breaking the contract… i'd rather go the long term best way and break now than later"*). `/ip` is the stable plain-text endpoint. Order of the rule, in `preferredForm()`:
 
@@ -84,12 +84,16 @@ otherwise                                      -> JSON
 
 ✅ **The two doc surfaces have DIFFERENT AUDIENCES and are allowed to read differently** (Drew, 2026-08-02: *"it is ok to me if /docs /llms.txt reads LLM friendly while HTML is designed for human audience… didn't mean to force those to match"*). The page says "gets **this HTML page**" because a human is looking at it; `/docs` says "gets **HTML**" because it is plain text being parsed. **Don't homogenise them.**
 
-⚠️ **`lib/docs.js` and the page's Usage list state the same CONTRACT twice — the routes and behaviour, not the wording.** Change a route and you change both. Do **not** sync the prose; that was tried and reverted the same day. Tests check the docs mention every live endpoint and never mention the removed `/test/`.
+⚠️ **`docs.go` and the page's Usage list state the same CONTRACT twice — the routes and behaviour, not the wording.** Change a route and you change both. Do **not** sync the prose; that was tried and reverted the same day. Tests check the docs mention every live endpoint and never mention the removed `/test/`.
 
 **The `connection` object is the differentiator, not incidental** — and it differs by front door:
 
-- **Native** (`myip.blue`, `v4.`, `v6.` — direct, TLS terminated here): `protocol` · `remotePort` (client source port) · `remoteFamily` (`IPv4`/`IPv6`, from the `::ffff:` v4-mapped prefix, which is also stripped for display) · and on https, `tlsProtocol` / `cipherName` / `cipherStandardName` **read off the live socket**.
+- **Native** (`myip.blue`, `v4.`, `v6.` — direct, TLS terminated here): `protocol` · `remotePort` (client source port) · `remoteFamily` (`IPv4`/`IPv6`; a v4 client on the dual-stack listener arrives v4-mapped and prints as plain v4) · and on https, `tlsProtocol` / `cipherName` / `cipherStandardName` **read off the live connection**. `tlsProtocol` keeps the Node-era strings (`TLSv1` … `TLSv1.3`); `cipherName` is OpenSSL's name from the table in `tls.go` (Go knows only IANA names), `cipherStandardName` the IANA one.
 - **Edge** (`cf.myip.blue` — arrives via the tunnel on loopback): `via: "cloudflare"` · `remoteFamily` · plus whatever Cloudflare supplies — `country`, `colo`, `ray`, `tlsVersion`, `tlsCipher`. Absent headers are **omitted rather than reported empty**, so what you see is what the edge actually sent.
+
+**`headers` come out name-sorted, lowercased** — net/http keeps no wire order (Node echoed wire order; changed with the Go rewrite, 2026-11-06). Duplicate fields are joined `, `.
+
+🛑 **TLS: AS LOW AS GO GOES, ON PURPOSE** (Drew, 2026-11-06: *"one of the points of myip.blue is to be able to show old clients what they're doing"*). `MinVersion` TLS 1.0 and every suite `tls.CipherSuites()` + `tls.InsecureCipherSuites()` returns — RC4 and 3DES included; a test negotiates each at each version. **Never "harden" this.** The floor is crypto/tls's: no SSLv3, DHE, export or NULL. RSA key exchange and ECDHE_RSA need the optional RSA pair (`TLS_RSA_CERT`/`TLS_RSA_KEY`); Go serves each client the first cert it supports, **and matches SNI first — an RSA cert lacking a name the ECDSA one has is never chosen for that name.** HTTP/2 is off (HTTP/1.1 only, as under Node); enabling it is its own change.
 
 **Also contractual:** no-store cache headers on every response · one access-log line per request to stdout, `<ISO8601> - <ip> <proto> <host> <url> "<ua>" <status> <ms>` — **including `/static` hits**, so keep static going through the same handler · `v4.` resolves A only, `v6.` AAAA only, apex both.
 
@@ -97,13 +101,13 @@ otherwise                                      -> JSON
 
 ## 🔴 Security — the invariants
 
-Five things hold the line. Each has a test that **fails when only that protection is broken** (verified by deliberately breaking each one, 2026-08-02; #4 on 2026-11-06) — if you change any of them, run `npm test` and believe it.
+Five things hold the line. Each has a test that **fails when only that protection is broken** (verified by breaking each one: Node 2026-08-02, Go 2026-11-06) — change any of them and believe `go test`.
 
-1. **`escapeHtml` in `lib/page.js`.** Request headers are attacker-controlled and are echoed into the page. Dropping pug moved auto-escaping into our code; this is the only thing standing between a header and stored XSS.
-2. **The `/static` traversal guard** — resolve the path, *then* require containment under `STATIC_DIR`. String-matching `..` is not equivalent; percent-encoding defeats it.
-3. **CF-* headers are trusted ONLY from loopback.** That is what makes the edge view safe: a direct request forging `CF-Connecting-IP` arrives from a real remote address and is treated as native, so it cannot claim to be someone else.
-4. **`logField` in `index.js`** — Host and User-Agent are caller-written and Node passes spaces and `"` through; raw, a UA of `x" 200 1.0ms` forged a status field (2026-11-06). Escaped nginx-style; ordinary lines are byte-identical. The page's CSP (`PAGE_CSP`) is a second line behind `escapeHtml`, never instead of it.
-5. **Zero dependencies.** No supply chain, nothing to audit. Keep it that way — the bar for adding a runtime dep is very high. (The old tree listed **`fs`** and **`https`** as npm dependencies: real packages squatting Node core module names, pulled in for imports that always resolved to core.)
+1. **`html/template` in `page.go`.** Request headers are attacker-controlled and are echoed into the page; contextual escaping is the only thing between a header and stored XSS. Never pass it a `template.HTML` built from request data. The page's CSP (`pageCSP`) is a second line, never instead.
+2. **`/static` can name only the embedded files** — `static/` is compiled in (`embed`), and the decoded path must pass `fs.ValidPath` (refuses `..`, `.`, empty elements). String-matching `..` is not equivalent; percent-encoding defeats it.
+3. **CF-* headers are trusted ONLY from loopback.** That is what makes the edge view safe: a direct request forging `CF-Connecting-IP` arrives from a real remote address and is treated as native, so it cannot claim to be someone else. The value must also parse as an IP.
+4. **`logField` in `handler.go`** — the User-Agent is caller-written and net/http passes spaces and `"` through; raw, a UA of `x" 200 1.0ms` forged a status field (2026-11-06). Escaped nginx-style; ordinary lines are byte-identical. (Host cannot carry those bytes: net/http 400s an invalid Host.)
+5. **Dependencies: stdlib + `golang.org/x/net` only** (for `netutil.LimitListener`). The bar for anything more is very high. (The Node tree once listed **`fs`** and **`https`** as npm dependencies: real packages squatting core module names.)
 
 ✅ **`GET /test/:host` was REMOVED (Drew, 2026-08-02).** It was an unauthenticated server-side fetch — a textbook SSRF primitive reachable at internal addresses and cloud metadata endpoints — whose only mitigation was a *host-level* setting. **Do not reintroduce a fetch-on-behalf endpoint** without deny-listing private/link-local/metadata ranges **after DNS resolution**, restricting schemes, refusing redirects, and rate limiting.
 
@@ -113,14 +117,19 @@ Five things hold the line. Each has a test that **fails when only that protectio
 
 | Path | What it is |
 |---|---|
-| `index.js` | The whole service — routing, connection description, both listeners. |
-| `lib/page.js` | The entire view layer — one template literal. 🛑 `escapeHtml` is load-bearing (see above). |
-| `test/` | `node --test`, zero test deps. `npm test`. |
-| `static/` | `blue.jpg`. |
-| `Dockerfile` | Single stage on **distroless** (`nodejs22-debian12:nonroot`), 155MB. **Not alpine** — reasoning is in the file. |
-| `.github/workflows/` | Test, then build + publish a multi-arch image to **GHCR** on push to `main` / `v*`. Token read-only by default; actions pinned to commit SHAs. |
+| `main.go` | Config from env, the three listeners, timeouts, connection caps, signals, the `healthcheck` subcommand. |
+| `handler.go` | Routing, connection description, responses, the access log. |
+| `tls.go` | 🛑 The TLS range (see above), cert loading, the OpenSSL-name table. |
+| `page.go` / `docs.go` | The HTML page (html/template); `/docs`, `robots.txt`, `security.txt` text. |
+| `server_test.go` | Black-box tests over real sockets, ported from the Node suite. `go test ./...`. |
+| `testdata/` | Throwaway self-signed localhost pairs (ECDSA + RSA), test-only. |
+| `static/` | `blue.jpg`, embedded in the binary. |
+| `Dockerfile` | `golang` build stage cross-compiling a static binary → **distroless/static**, ~16MB. |
+| `.github/workflows/` | `go vet`, `go test -race`, govulncheck, then build + publish a multi-arch image to **GHCR** on push to `main` / `v*`. Token read-only by default; actions pinned to commit SHAs. |
 | `.github/workflows/dependabot-auto-merge.yml` | Auto-merge on EVERY Dependabot PR, majors included — the required `test` + `build` checks are the gate, the manual rollout is the review (Drew, 2026-11-06). 🪤 A `GITHUB_TOKEN` merge starts no `push` run: the image workflow's Tuesday `schedule` (or `workflow_dispatch`) builds it. Direct pushes to `main` pass the checks ruleset by admin bypass. |
-| `.github/dependabot.yml` | Weekly bumps of the action SHAs and the Dockerfile's base-image digest — the only way Node releases reach the image. ⚠️ distroless `nodejs22` trails `node:22` releases (22.22.0 vs 22.23.2 on 2026-11-06). |
+| `.github/dependabot.yml` | Weekly bumps of the action SHAs, both Dockerfile base digests (the `golang` one is how Go point releases arrive) and Go modules. |
+
+**Tag `node-final`** = the last Node version (`758911e`); its CI image is the rollback past the rewrite.
 
 Canonical doc files, when this repo needs them: **`TODO.md`** (active work, `## P1` / `## P2`, `- [ ] (due YYYY-MM-DD) desc — context`) · **`TODO-EVENTUALLY.md`** (someday) · **`done/YYYY-MM-DD-task.md`** (one file per finished item; a decision *not* to do something is also a `done/` entry) · **`logs/YYYY-MM-DD-slug.md`** (session journal, grep fodder). **None exist yet** — create on first need, and remember Rule Zero applies to all of them.
 
@@ -128,26 +137,24 @@ Canonical doc files, when this repo needs them: **`TODO.md`** (active work, `## 
 
 ## Gotchas
 
-- 🛑 **Timeouts — all five settings are load-bearing; remove none.** `server.timeout` (inactivity): without it a partial request line then silence was still open at 70 s (2026-11-06 audit). `requestTimeout` / `headersTimeout` are enforced only every **`connectionsCheckingInterval`** (default 30 s, a `createServer` option, now 1 s) — a header dripped every 3 s was held 27 s without it. 🪤 **The 2026-08-02 verdict that those two "do nothing" was a misdiagnosis**: the 15 s observation sat inside Node's 30 s sweep. `handshakeTimeout`: none of the others reaches a socket before its TLS handshake ends (tls default 120 s; :443 held a silent socket ≥20 s without it). Test cert: `test/fixtures/`, self-signed, test-only.
-- 🛑 **`maxConnections` on both servers is the only bound on a connection FLOOD** — keep-alive that re-requests every 4 s trips no timeout, and ~1,500 idle TLS connections (~65 KB each, native memory, so `--max-old-space-size` is no help) OOM-killed the container, cf. tunnel included (2026-11-06). Size the caps against the compose memory limit (comment in `index.js`). A cap refuses everyone once full; a per-source limit belongs in the host firewall (control repo).
-- ⚠️ **`EDGE_PORT` = cloudflared's own listener, `127.0.0.1` only, own cap** — so a flood that fills the public :80's slots cannot take `cf.` down with it. Unset = none (local dev). CF-* trust still rests on the loopback SOURCE, not on the listener. Where the tunnel points → control repo.
-- ⚠️ **`clientError` is overridden only to LOG Node's own parser rejections** (400/431/408), which otherwise never reach the access log — otherwise it IS Node's default: answer only an untouched socket (`bytesWritten` 0), write, destroy. 🛑 `try/catch/finally`: destroyed on every path, nothing escapes (a listener throw kills the process; a test injects one). `end()` instead of `destroy()` half-closes and a silent client keeps the socket; TLS errors (https forwards them here) get no HTTP answer. 🪤 Over a real network an oversized-header client still sending gets the RST, not the 431 — Node's default too; accepted. `requireHostHeader: false` only moves the RFC no-Host 400 into `route()` so it is logged too.
-- ⚠️ **Container `HEALTHCHECK` must be exec-form and name node by absolute path.** Distroless has no shell, so `HEALTHCHECK CMD curl …` is impossible, and `HEALTHCHECK` does **not** inherit `ENTRYPOINT` — hence `["/nodejs/bin/node", "/app/lib/healthcheck.js"]`.
-
-- 🛑 **The Mac's `node` is brew's latest, not 22; this project targets 22. Verify on 22 before trusting a green run:** `docker run --rm -v "$PWD:/app" -w /app node:22-slim npm test`. **This already bit once** — `"test": "node --test test/"` passed on Node 20 and failed on 22, which resolves the directory as a *module path* (`Cannot find module …/test`). `node --test` with no argument auto-discovers and works on both.
-- **Run it locally: `npm run dev`** (8080/8443) or `node index.js`. **TLS is optional** — if the cert files are unreadable it logs a warning and serves HTTP only. That is deliberate: the previous version read certs by absolute path at *module load* and died with `ENOENT` before the server existed, so it could never be run outside a container.
-- ⚠️ **Certs are still read once at startup**, so a renewal needs a restart — and with no reverse proxy in front, that restart is user-visible downtime. Unavoidable in-process; it is a deploy-shape problem, handled in the control repo.
-- 🛑 **Never `new URL(req.url, base)` — it resolves a leading `//` as a host, and a bad one throws → 500** (a scanner's `//interactsh.com%2f..`, 2026-11). `requestPath()` parses by RFC 9112 form: origin-form appended to a base (Node's documented form, `//x` stays a path → 404), absolute-form as its own URL (a server MUST accept it), `*` → 400. Node's parser passes only those three forms through; anything else is its own 400 before our code runs.
-- ⚠️ **Routes must accept both `/ip` and `/ip/`.** Express matched both by default; this implementation matches them explicitly. Drop one and you silently break existing callers.
-- ⚠️ **Static is served through the same handler as everything else, on purpose**, so static hits appear in the access log. The original achieved this by mounting `express.static` *after* the logger — same intent, don't "tidy" it away.
-- **Binding 80/443 as non-root needs `NET_BIND_SERVICE`** from the runtime, or ports above 1024. The image no longer runs as root.
-- **`package-lock.json` is gitignored** and there is nothing to lock — dependencies are empty. If a dep is ever added, revisit that ignore: the Dockerfile's `COPY package*.json` glob matches a lockfile.
-- **Distroless has no shell**, so `docker exec sh` fails by design. To debug interactively, rebuild temporarily on `node:22-slim`.
+- 🛑 **Timeouts — zero means NO LIMIT in net/http.** `ReadHeaderTimeout` and `ReadTimeout` each bound the request head (either alone passes the tests; neither, and a silent socket is held forever); the TLS handshake runs under the smallest of the three read/write timeouts; `IdleTimeout` bounds keep-alive. Deadlines are absolute, so a dripped header is cut too.
+- 🛑 **`netutil.LimitListener` on every listener is the only bound on a connection FLOOD.** A full listener ACCEPTS NOTHING: the excess waits in the kernel backlog (Node refused it) — so the healthcheck fails while :80 is full. Measured 2026-11-06 in a 128MB test container, both caps full, keep-alive every 3s: **~77MB with `GOMEMLIMIT=64MiB`, 112–120MB without** — Go does not read the cgroup limit, so the deployment must set `GOMEMLIMIT` beside its memory limit. A per-source limit belongs in the host firewall (control repo).
+- ⚠️ **`EDGE_PORT` = cloudflared's own listener, `127.0.0.1` only, own cap** — so a flood that fills the public :80's slots cannot take `cf.` down with it. Unset/0 = none (local dev). CF-* trust still rests on the loopback SOURCE, not on the listener.
+- ⚠️ **net/http answers malformed requests itself — none reach the handler or the access log.** No Host on HTTP/1.1, two Hosts, an invalid Host, a bad header line → its own 400; oversized head → 431 (`MaxHeaderBytes` + 4KB slack); a timeout → close, no 408. The Node version logged these and sent the 408 — dropped with the rewrite (no hook exists). TLS handshake failures go to stderr (`http: TLS handshake error … client offered: [..]`) — the record of which old clients we could not serve.
+- ⚠️ **Never put a `ServeMux` in front of `route()`.** It cleans paths and 301-redirects `//x`, `/a/../b`; routes match `r.URL.EscapedPath()` as sent, deliberately. `DisableGeneralOptionsHandler` sends `OPTIONS *` to `route()` too.
+- 🛑 **Never `new URL(req.url, base)`-style resolution** — the Node bug: it read a leading `//` as a host and threw → 500 (a scanner's `//interactsh.com%2f..`, 2026-11). net/http's request-URI parse keeps `//x` a path; a test asserts the 404.
+- ⚠️ **Routes must accept both `/ip` and `/ip/`.** Drop one and you silently break existing callers.
+- ⚠️ **Static is served through the same handler as everything else, on purpose**, so static hits appear in the access log.
+- ⚠️ **`HEALTHCHECK` is exec-form `["/myip", "healthcheck"]`** — distroless has no shell. It checks plain HTTP on loopback, deliberately not the cert.
+- **Run it locally: `go run .` with `HTTP_PORT=8080 HTTPS_PORT=8443`**. TLS is optional — unreadable cert files → a warning and HTTP only. 🪤 **In the DrewHome checkout prefix `GOWORK=off`** (a parent `go.work` covers other modules and `go test` fails setup otherwise).
+- ⚠️ **Certs are read once at startup**, so a renewal needs a restart — user-visible downtime with no proxy in front. Handled in the control repo.
+- **Binding 80/443 as non-root needs `NET_BIND_SERVICE`** from the runtime, or ports above 1024. The image runs as non-root.
+- **Distroless has no shell**, so `docker exec sh` fails by design.
 
 ---
 
 ## Deploy
 
-**Direction agreed 2026-08-02 (Drew):** functional-equivalent rewrite on a current Node with the security cleaned up → publish a **public** image to **GHCR** → deploy to the origin → and serve the `cf.` variant from that same deployment over a **Cloudflare Tunnel**, retiring the separate edge reimplementation so there is one codebase instead of two.
+**Direction agreed 2026-08-02 (Drew):** functional-equivalent rewrite on a current Node (then rewritten in Go, decided 2026-11-06) with the security cleaned up → publish a **public** image to **GHCR** → deploy to the origin → and serve the `cf.` variant from that same deployment over a **Cloudflare Tunnel**, retiring the separate edge reimplementation so there is one codebase instead of two.
 
 Everything operational about that — origin details, compose, cert wiring, tunnel config, rollback, verification — lives in the **control repo** (`docs/myip.blue.md`), per Rule Zero. **This tree is just source.** Don't re-document ops here; a second copy in a public repo is both a leak and a drift.

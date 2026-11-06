@@ -1,22 +1,26 @@
-// HTML rendering. No template engine — this is the entire view layer.
+package main
+
+import "html/template"
+
+// HTML rendering — the entire view layer.
 //
 // 🛑 Everything interpolated here is attacker-controlled (request headers are
-// echoed back verbatim). escapeHtml is NOT optional: pug's `=` was doing this
-// for free, and dropping the engine moves the responsibility here.
+// echoed back verbatim). html/template escapes by context; never hand it a
+// template.HTML built from request data, which switches that off.
 
-const ESCAPES = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  '"': "&quot;",
-  "'": "&#39;",
-};
-
-export function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/g, (c) => ESCAPES[c]);
+type pageData struct {
+	ClientIP   string
+	Headers    fields
+	Connection fields
 }
 
-const STYLE = `body {
+var page = template.Must(template.New("page").Parse(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>myip.blue - Because IP addresses are blue!</title>
+<style>body {
   font-family: Verdana;
 }
 .blue {
@@ -55,39 +59,18 @@ th {
   background-color: #CCCCFF;
   font-weight: bold;
   text-align: left;
-}`;
-
-function rows(obj) {
-  return Object.entries(obj)
-    .map(
-      ([k, v]) =>
-        `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(v)}</td></tr>`,
-    )
-    .join("");
-}
-
-function section(title, obj) {
-  return `<tr><th colspan="2">${escapeHtml(title)}</th></tr>${rows(obj)}`;
-}
-
-export function renderPage({ clientIp, headers, connection }) {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>myip.blue - Because IP addresses are blue!</title>
-<style>${STYLE}</style>
+}</style>
 </head>
 <body>
 <h1>myip.blue - Because IP addresses are blue!</h1>
-<h1>Your public IP address: <span class="blue" style="display:inline">${escapeHtml(clientIp)}</span></h1>
-<table>${section("Client Headers", headers)}${section("Connection", connection)}</table>
+<h1>Your public IP address: <span class="blue" style="display:inline">{{.ClientIP}}</span></h1>
+<table><tr><th colspan="2">Client Headers</th></tr>{{range .Headers}}<tr><td>{{.Key}}</td><td>{{.Value}}</td></tr>{{end}}<tr><th colspan="2">Connection</th></tr>{{range .Connection}}<tr><td>{{.Key}}</td><td>{{.Value}}</td></tr>{{end}}</table>
 <h2>Usage:</h2>
 <ul>
 <li><span class="code"><a href="https://myip.blue/">myip.blue</a></span> is available over http/80 or https/443, and resolves to ipv4 and ipv6 addresses.</li>
 <ul>
 <li>At <span class="code">/</span>, JSON is the default. An <span class="code">Accept:</span> header naming a type wins; failing that, a user-agent starting with <span class="code">Mozilla/</span> gets this HTML page.</li>
+<li>Over https, TLS 1.0 and every cipher suite still implemented are accepted, weak ones included, so older clients can see what they negotiate.</li>
 </ul>
 <li><span class="code"><a href="https://v4.myip.blue/">v4.myip.blue</a></span> only resolves ipv4.</li>
 <li><span class="code"><a href="https://v6.myip.blue/">v6.myip.blue</a></span> only resolves ipv6.</li>
@@ -100,5 +83,4 @@ export function renderPage({ clientIp, headers, connection }) {
 <p>The <b>only</b> source for authentic blue IP addresses. Hosted by <a href="https://alt.org">alt.org</a>. Dedicated to the real <a href="/static/blue.jpg">Blue</a>.</p>
 </body>
 </html>
-`;
-}
+`))
