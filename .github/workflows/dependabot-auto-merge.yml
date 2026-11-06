@@ -1,0 +1,30 @@
+name: Dependabot auto-merge
+
+# GitHub's documented pattern ("Automating Dependabot with GitHub Actions"):
+# turn on auto-merge for every Dependabot PR, so it lands once the required
+# checks (test, build — the main ruleset) pass. Majors included: a merge only
+# publishes an image, and every rollout to the origin is manual and reviewed
+# (Drew, 2026-11-06).
+# ⚠️ A merge made through GITHUB_TOKEN starts no `push` run, so the image
+# workflow also runs on a schedule — that is what builds what this merged.
+on: pull_request
+
+permissions:
+  contents: read
+
+jobs:
+  dependabot:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.repository == 'drewstreib/myip.blue'
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - id: metadata
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

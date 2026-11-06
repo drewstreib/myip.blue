@@ -6,6 +6,11 @@ on:
     tags: ["v*"]
   pull_request:
     branches: ["main"]
+  # Builds `main` after a Dependabot auto-merge, whose GITHUB_TOKEN merge
+  # starts no `push` run. Tuesday, after Dependabot's Monday run.
+  schedule:
+    - cron: "17 9 * * 2"
+  workflow_dispatch:
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}

@@ -119,6 +119,7 @@ Five things hold the line. Each has a test that **fails when only that protectio
 | `static/` | `blue.jpg`. |
 | `Dockerfile` | Single stage on **distroless** (`nodejs22-debian12:nonroot`), 155MB. **Not alpine** — reasoning is in the file. |
 | `.github/workflows/` | Test, then build + publish a multi-arch image to **GHCR** on push to `main` / `v*`. Token read-only by default; actions pinned to commit SHAs. |
+| `.github/workflows/dependabot-auto-merge.yml` | Auto-merge on EVERY Dependabot PR, majors included — the required `test` + `build` checks are the gate, the manual rollout is the review (Drew, 2026-11-06). 🪤 A `GITHUB_TOKEN` merge starts no `push` run: the image workflow's Tuesday `schedule` (or `workflow_dispatch`) builds it. Direct pushes to `main` pass the checks ruleset by admin bypass. |
 | `.github/dependabot.yml` | Weekly bumps of the action SHAs and the Dockerfile's base-image digest — the only way Node releases reach the image. ⚠️ distroless `nodejs22` trails `node:22` releases (22.22.0 vs 22.23.2 on 2026-11-06). |
 
 Canonical doc files, when this repo needs them: **`TODO.md`** (active work, `## P1` / `## P2`, `- [ ] (due YYYY-MM-DD) desc — context`) · **`TODO-EVENTUALLY.md`** (someday) · **`done/YYYY-MM-DD-task.md`** (one file per finished item; a decision *not* to do something is also a `done/` entry) · **`logs/YYYY-MM-DD-slug.md`** (session journal, grep fodder). **None exist yet** — create on first need, and remember Rule Zero applies to all of them.
