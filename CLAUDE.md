@@ -34,7 +34,7 @@ Doc conventions in full → **`/d:docs`**, which also runs the end-of-session pa
 
 ## 🚦 Guardrails
 
-- ✅ **Pushing `main` publishes an image; it does NOT deploy.** CI builds and pushes to GHCR, but the origin only takes it on an explicit `docker compose pull && up -d`. Commit and push freely.
+- ✅ **Pushing `main` publishes an image; it does NOT deploy.** CI builds and pushes to GHCR, but the origin only takes it on an explicit, reviewed rollout (control repo). Commit and push freely.
 - 🛑 **Deploying is the separate, gated step** — Drew's go, procedure in the control repo.
 - 🛑 **Rollback = the previous CI image digest** — the control repo's rollout script prints it on every deploy. The pre-2026-08-02 image survives on the origin as a tag *and* a tarball as a last resort (a plain `docker image prune -af` reaps unused tags). Details in the control repo.
 - ⚠️ **There is NO source tree on the origin any more** (deleted 2026-08-02). It is a pull target. The old on-host checkout had drifted from git for years — building there is *how* it drifted. **This checkout is the working tree.**
