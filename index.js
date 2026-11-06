@@ -415,11 +415,16 @@ const CLIENT_ERROR_STATUS = {
 // 🛑 The socket is destroyed on EVERY path (finally), and nothing escapes: a
 // throw from a listener here is an uncaught exception and kills the process. A
 // Node upgrade that renames an error code degrades to "destroyed, unanswered".
+// Write-then-destroy is Node's default too: over a real network a client still
+// sending (an oversized 431) gets an RST that discards the answer — accepted;
+// the socket closes, the line is logged.
 function onClientError(isTls) {
   return (err, socket) => {
     try {
       const httpError = err?.code?.startsWith("HPE_") || err?.code === "ERR_HTTP_REQUEST_TIMEOUT";
-      if (!httpError || !socket.writable) return;
+      // Node's own default answers only on an untouched socket (bytesWritten 0),
+      // never into a keep-alive stream that already carried a response.
+      if (!httpError || !socket.writable || socket.bytesWritten > 0) return;
       const status = CLIENT_ERROR_STATUS[err.code] ?? "400 Bad Request";
       const { ip } = normaliseIp(socket.remoteAddress); // gone once destroyed
       socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);

@@ -419,6 +419,19 @@ test("🛑 every client-error path answers or closes, and the server survives al
   assert.match(await raw(PORT, `GET /ip HTTP/1.1\r\nHost: x\r\nX-Big: ${"a".repeat(20000)}\r\n\r\n`), /^HTTP\/1\.1 431 /);
   // Malformed header line → 400.
   assert.match(await raw(PORT, "GET /ip HTTP/1.1\r\nBad Header\r\n\r\n"), /^HTTP\/1\.1 400 /);
+  // A malformed request AFTER a good one on the same keep-alive socket: Node's
+  // default answers only an untouched socket, so one 200 and a close, no 400.
+  const pipelined = await new Promise((resolve) => {
+    let d = "";
+    const s = net.connect(PORT, "127.0.0.1", () =>
+      s.write("GET /ip HTTP/1.1\r\nHost: x\r\n\r\nGET /ip HTTP/1.1\r\nBad Header\r\n\r\n"),
+    );
+    s.on("data", (x) => (d += x));
+    s.on("close", () => resolve(d));
+    s.on("error", () => resolve(d));
+  });
+  assert.equal((pipelined.match(/^HTTP\/1\.1 /gm) ?? []).length, 1, "exactly one response on the stream");
+  assert.match(pipelined, /^HTTP\/1\.1 200 /);
   // Plain HTTP / junk at the TLS port → closed, no HTTP answer, no crash.
   assert.doesNotMatch(await raw(TLS_PORT, "GET /ip HTTP/1.1\r\nHost: x\r\n\r\n"), /^HTTP\//);
   assert.doesNotMatch(await raw(TLS_PORT, "\x16\x03\x01\x00\x05junk!"), /^HTTP\//);
