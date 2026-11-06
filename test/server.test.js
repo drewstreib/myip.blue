@@ -189,6 +189,38 @@ test("unknown paths return the 404 string", async () => {
   assert.equal(await res.text(), "Sorry! Blue can't find that!");
 });
 
+// Send a request-target byte for byte — fetch() would normalise it first.
+async function rawStatus(target, method = "GET") {
+  const net = await import("node:net");
+  return new Promise((resolve, reject) => {
+    let data = "";
+    const sock = net.connect(PORT, "127.0.0.1", () =>
+      sock.write(`${method} ${target} HTTP/1.1\r\nHost: myip.blue\r\nConnection: close\r\n\r\n`),
+    );
+    sock.on("data", (d) => (data += d));
+    sock.on("end", () => resolve(Number(data.split(" ")[1])));
+    sock.on("error", reject);
+  });
+}
+
+test("a request-target starting // is a path, not a host (scanner 500, 2026-11)", async () => {
+  // RFC 9112 §3.2.1: origin-form is 1*( "/" segment ) and a segment may be
+  // empty, so //host is a path. Resolving req.url against a base read it as an
+  // authority, and an invalid one threw → 500.
+  assert.equal(await rawStatus("//interactsh.com%2f.."), 404);
+  assert.equal(await rawStatus("//example.com/ip"), 404, "//host/ip is not /ip");
+  assert.equal(await rawStatus("/ip?x=//interactsh.com%2f.."), 200);
+});
+
+test("absolute-form is honoured; a target with no path is a 400, never a 500", async () => {
+  // RFC 9112 §3.2.2: a server MUST accept absolute-form. Node's parser passes
+  // only origin-, absolute- and asterisk-form through, so these are the cases.
+  assert.equal(await rawStatus("http://myip.blue/ip"), 200);
+  assert.equal(await rawStatus("http://[bad/"), 400);
+  assert.equal(await rawStatus("*"), 400);
+  assert.equal(await rawStatus("*", "OPTIONS"), 204);
+});
+
 test("responses are not cacheable", async () => {
   assert.match((await get("/ip")).headers.get("cache-control"), /no-store/);
 });

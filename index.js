@@ -199,9 +199,22 @@ function notFound(res) {
 
 // ── routing ──────────────────────────────────────────────────────────────────
 
+// RFC 9112 §3.2: origin-form ("/…") is a path even when it begins "//" — its
+// first segment is empty — so it is appended to a base, as Node's docs do,
+// never resolved against one (that reads "//x" as a host, and a bad one
+// throws). Absolute-form is a URL in its own right. Anything else ("*") has no
+// path. null → 400.
+function requestPath(target) {
+  try {
+    return new URL(target.startsWith("/") ? `http://localhost${target}` : target).pathname;
+  } catch {
+    return null;
+  }
+}
+
 async function route(req, res, isTls) {
   const { clientIp, connection } = describe(req, isTls);
-  const urlPath = new URL(req.url, "http://placeholder").pathname;
+  const urlPath = requestPath(req.url);
   const payload = { clientIp, headers: req.headers, connection };
 
   if (req.method === "OPTIONS") {
@@ -214,6 +227,11 @@ async function route(req, res, isTls) {
     });
     res.end();
     return { status: 204, clientIp, connection };
+  }
+
+  if (urlPath === null) {
+    send(res, 400, "text/plain; charset=utf-8", "Sorry! Blue can't read that!");
+    return { status: 400, clientIp, connection };
   }
 
   if (req.method !== "GET" && req.method !== "HEAD") {
