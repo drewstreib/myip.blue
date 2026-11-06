@@ -11,6 +11,7 @@ import os from "node:os";
 
 const PORT = 18080;
 const TLS_PORT = 18443;
+const EDGE_PORT = 18081;
 let server;
 let serverLog = ""; // the access log, so tests can assert what a parser would read
 
@@ -32,6 +33,7 @@ before(async () => {
       ...process.env,
       HTTP_PORT: String(PORT),
       HTTPS_PORT: String(TLS_PORT),
+      EDGE_PORT: String(EDGE_PORT),
       TLS_KEY: "test/fixtures/localhost-key.pem",
       TLS_CERT: "test/fixtures/localhost-cert.pem",
     },
@@ -382,6 +384,22 @@ test("requests rejected before routing still get a 400 and reach the access log"
   await new Promise((r) => setTimeout(r, 200));
   assert.match(serverLog, / 127\.0\.0\.1 http - - "-" 400 0\.0ms\n/, "the parser-level 400 is logged");
   assert.match(serverLog, new RegExp(` 127\\.0\\.0\\.1 http - /${marker} "-" 400 `), "the no-Host 400 is logged");
+});
+
+test("the edge listener serves the cf. view on loopback, and ONLY on loopback", async (t) => {
+  const body = await (
+    await fetch(`http://127.0.0.1:${EDGE_PORT}/json`, { headers: { "cf-connecting-ip": "203.0.113.7" } })
+  ).json();
+  assert.equal(body.clientIp, "203.0.113.7");
+  assert.equal(body.connection.via, "cloudflare");
+  const lan = lanAddress();
+  if (!lan) return t.skip("no non-loopback address on this host");
+  const net = await import("node:net");
+  const reached = await new Promise((resolve) => {
+    const s = net.connect(EDGE_PORT, lan, () => { s.destroy(); resolve(true); });
+    s.on("error", () => resolve(false));
+  });
+  assert.equal(reached, false, `edge port must not be reachable on ${lan}`);
 });
 
 test("responses are not cacheable", async () => {

@@ -29,6 +29,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 const HTTP_PORT = Number(process.env.HTTP_PORT ?? 80);
 const HTTPS_PORT = Number(process.env.HTTPS_PORT ?? 443);
+const EDGE_PORT = Number(process.env.EDGE_PORT ?? 0); // 0 = no edge listener
 const TLS_KEY = process.env.TLS_KEY ?? "/key.pem";
 const TLS_CERT = process.env.TLS_CERT ?? "/chain.pem";
 const STATIC_DIR = path.resolve(process.env.STATIC_DIR ?? path.join(HERE, "static"));
@@ -395,6 +396,7 @@ const SERVER_OPTIONS = { connectionsCheckingInterval: 1000, requireHostHeader: f
 // a per-IP limit, which belongs in the host firewall, not here.
 const MAX_HTTP_CONNECTIONS = 2000;
 const MAX_TLS_CONNECTIONS = 1000;
+const MAX_EDGE_CONNECTIONS = 500; // cloudflared only; it pools a handful
 
 // Node's parser answers malformed requests itself, before any handler runs, so
 // by default they never reach the access log — and that is most scanner
@@ -466,6 +468,18 @@ if (tls) {
     console.log(`${new Date().toISOString()} - https listening on ${HTTPS_PORT}`),
   );
   servers.push(httpsServer);
+}
+
+// The cf. front door's own listener: loopback-only, its own connection cap, so
+// a flood that fills the public :80's slots cannot take the edge view down with
+// it (cloudflared used to share :80). Unset = no edge listener. CF-* trust is
+// unchanged — it still rests on the loopback source, not on which listener.
+if (EDGE_PORT) {
+  const edgeServer = tune(http.createServer(SERVER_OPTIONS, handler(false)), MAX_EDGE_CONNECTIONS, false);
+  edgeServer.listen(EDGE_PORT, "127.0.0.1", () =>
+    console.log(`${new Date().toISOString()} - edge listening on 127.0.0.1:${EDGE_PORT}`),
+  );
+  servers.push(edgeServer);
 }
 
 // Exit cleanly on signals. The old image ran `npm run start` as PID 1, which
